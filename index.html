@@ -6,6 +6,8 @@
     <title>Echo Life - Voice to AI</title>
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/audio-upload.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 </head>
 <body>
     <div class="container">
@@ -29,9 +31,10 @@
                 <p id="recordingStatus">Click to start recording</p>
             </section>
             
-            <section class="transcript-section">
-                <h2>Transcript</h2>
-                <div id="transcriptBox" class="transcript-box" contenteditable="true"></div>
+            <!-- Audio drop area section -->
+            <section class="audio-drop-section">
+                <h2>Upload Audio</h2>
+                <div id="audio-upload-placeholder"></div>
             </section>
             
             <section class="chat-section">
@@ -39,9 +42,15 @@
                 <div id="chatContainer" class="chat-container">
                     <!-- Chat messages will appear here -->
                 </div>
-                <button id="submitButton" class="submit-button" disabled>
-                    <i class="fas fa-paper-plane"></i> Submit to AI
-                </button>
+            </section>
+
+            <!-- Audio history section -->
+            <section class="audio-history-section">
+                <h2>Recent Audios</h2>
+                <div id="audioHistoryContainer" class="audio-history-container">
+                    <!-- Recently uploaded audio files will appear here -->
+                    <p class="empty-history-message">Your uploaded audio history will appear here</p>
+                </div>
             </section>
         </main>
         
@@ -54,6 +63,7 @@
     <script src="js/audio.js"></script>
     <script src="js/transcription.js"></script>
     <script src="js/chat.js"></script>
+    <script src="js/audio-handler.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

@@ -5,8 +5,9 @@ A simple web application that captures voice input, transcribes it using OpenAI'
 ## Features
 
 - Record audio directly in the browser
+- Drop or select audio files for instant transcription
 - Automatic transcription using OpenAI's Whisper API
-- AI chat interaction using OpenAI's GPT-4
+- Direct AI responses without manual submission
 - Clean, responsive user interface
 - Simple to deploy - no backend required
 
@@ -61,11 +62,10 @@ This application stores your API key in the browser's localStorage. While conven
 
 1. Click the microphone button to start recording.
 2. Speak clearly into your microphone.
-3. Click the button again to stop recording.
-4. Your speech will be automatically transcribed.
-5. Edit the transcript if needed.
-6. Click "Submit to AI" to send your transcript to GPT-4.
-7. View the AI's response in the chat section.
+3. Click the button again to stop recording and wait for AI response.
+4. Alternatively, drop any audio file into the drop area for automatic processing.
+5. View your transcription and the AI's response in the chat section.
+6. Access your history of past audio interactions at any time.
 
 ## License
 

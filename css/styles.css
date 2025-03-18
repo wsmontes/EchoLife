@@ -85,6 +85,17 @@ section {
     animation: pulse 2s infinite;
 }
 
+.record-button.processing {
+    background-color: var(--accent-color);
+    cursor: not-allowed;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
 @keyframes pulse {
     0% { transform: scale(1); }
     50% { transform: scale(1.05); }
@@ -145,7 +156,7 @@ section {
 
 /* Chat Section */
 .chat-container {
-    height: 250px;
+    height: 350px; /* Increased height since we removed the transcript box */
     overflow-y: auto;
     background-color: var(--light-gray);
     border-radius: var(--border-radius);
