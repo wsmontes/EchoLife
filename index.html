@@ -17,6 +17,14 @@
         </header>
         
         <main>
+            <!-- Tag display sections - moved to top for better visibility -->
+            <section class="tag-section">
+                <h3>Context Tags</h3>
+                <div id="userTagsContainer" class="tag-container">
+                    <span class="tag-placeholder">Tags will appear here when you speak or upload audio</span>
+                </div>
+            </section>
+            
             <section class="recording-section">
                 <div class="record-button-container">
                     <button id="recordButton" class="record-button">
@@ -42,6 +50,18 @@
                 <div id="chatContainer" class="chat-container">
                     <!-- Chat messages will appear here -->
                 </div>
+                <!-- New Feedback button -->
+                <button id="feedbackButton" class="feedback-button" disabled>
+                    <i class="fas fa-comment-dots"></i> Get AI Feedback
+                </button>
+            </section>
+
+            <!-- AI tag section - moved here after the chat -->
+            <section class="tag-section">
+                <h3>AI Response Tags</h3>
+                <div id="aiTagsContainer" class="tag-container">
+                    <span class="tag-placeholder">Tags from AI responses will appear here</span>
+                </div>
             </section>
 
             <!-- Audio history section -->
@@ -60,6 +80,7 @@
     </div>
 
     <!-- Scripts -->
+    <script src="js/tag-extractor.js"></script>
     <script src="js/audio.js"></script>
     <script src="js/transcription.js"></script>
     <script src="js/chat.js"></script>

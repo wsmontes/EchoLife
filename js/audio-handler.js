@@ -2,6 +2,7 @@ class AudioHandler {
     constructor(chatService) {
         this.chatService = chatService;
         this.audioHistory = [];
+        this.currentHistoryItem = null; // Track the most recent history item
         this.setupComplete = false;
         // Wait for DOM to be fully loaded before setting up
         if (document.readyState === 'loading') {
@@ -135,17 +136,28 @@ class AudioHandler {
             const transcription = await this.chatService.importAudio(file, isWhatsApp);
             console.log("Transcription received:", transcription);
             
+            // Extract tags from user input using tag extractor directly
+            try {
+                const tags = await tagExtractor.extractTags(transcription, 8, true);
+                if (window.displayTags) {
+                    const userTagsContainer = document.getElementById('userTagsContainer');
+                    window.displayTags(tags, userTagsContainer);
+                }
+            } catch (e) {
+                console.error('Error extracting tags:', e);
+            }
+            
             // Add transcription to chat as user message
             this.addTranscriptionToChat(transcription);
             
-            // Automatically send the transcription to the AI for processing
-            const response = await this.chatService.sendMessage(transcription, { conversationalResponse: true });
+            // Add to history without AI response yet
+            this.addRecordingToHistory(file, transcription);
             
-            // Update UI with AI response
-            this.updateChatUI(response);
-            
-            // Add to history
-            this.addToAudioHistory(file, response);
+            // Enable the feedback button for this upload
+            const feedbackButton = document.getElementById('feedbackButton');
+            if (feedbackButton) {
+                feedbackButton.disabled = false;
+            }
             
             console.log('Audio processing complete');
         } catch (error) {
@@ -270,12 +282,55 @@ class AudioHandler {
         this.saveAudioHistory();
     }
     
+    // New method to add recording to history without AI response yet
+    addRecordingToHistory(audioFile, transcript) {
+        // Create a history entry with file info and timestamp
+        const historyEntry = {
+            file: audioFile,
+            filename: audioFile.name,
+            type: audioFile.type,
+            size: audioFile.size,
+            timestamp: new Date(),
+            transcript: transcript,
+            response: null // No response yet
+        };
+        
+        // Keep track of current history item
+        this.currentHistoryItem = historyEntry;
+        
+        // Add to history array (keep most recent 10 entries)
+        this.audioHistory.unshift(historyEntry);
+        if (this.audioHistory.length > 10) {
+            this.audioHistory.pop();
+        }
+        
+        // Update history UI
+        this.updateAudioHistoryUI();
+        
+        // Save history to local storage
+        this.saveAudioHistory();
+    }
+    
+    // Update the current history item with AI response
+    updateCurrentHistoryWithResponse(response) {
+        if (this.currentHistoryItem) {
+            this.currentHistoryItem.response = response;
+            
+            // Update the history list
+            this.updateAudioHistoryUI();
+            
+            // Save updated history to local storage
+            this.saveAudioHistory();
+        }
+    }
+    
     saveAudioHistory() {
-        // Save minimal info to local storage (filenames and timestamps)
+        // Save minimal info to local storage (filenames, timestamps, transcripts, responses)
         const minimalHistory = this.audioHistory.map(entry => ({
             filename: entry.filename,
             timestamp: entry.timestamp,
-            response: entry.response.substring(0, 50) + '...'
+            transcript: entry.transcript ? entry.transcript.substring(0, 100) + '...' : null,
+            response: entry.response ? entry.response.substring(0, 50) + '...' : null
         }));
         
         try {
@@ -325,17 +380,21 @@ class AudioHandler {
             // Format timestamp
             const timestamp = entry.timestamp.toLocaleString();
             
+            // Show different icon if no response yet
+            const iconClass = entry.response ? 'fa-file-audio' : 'fa-microphone';
+            const responseStatus = entry.response ? '' : '<span class="no-response-badge">No feedback yet</span>';
+            
             historyItem.innerHTML = `
                 <div class="history-item-icon">
-                    <i class="fas fa-file-audio"></i>
+                    <i class="fas ${iconClass}"></i>
                 </div>
                 <div class="history-item-details">
-                    <div class="history-item-filename">${entry.filename}</div>
+                    <div class="history-item-filename">${entry.filename}${responseStatus}</div>
                     <div class="history-item-timestamp">${timestamp}</div>
                 </div>
             `;
             
-            // Add click listener to show the response
+            // Add click listener to show the transcript and response (if available)
             historyItem.addEventListener('click', () => {
                 this.showHistoryItemDetails(entry, index);
             });
@@ -346,21 +405,63 @@ class AudioHandler {
     
     showHistoryItemDetails(entry, index) {
         const chatContainer = document.getElementById('chatContainer');
+        const feedbackButton = document.getElementById('feedbackButton');
         
-        if (chatContainer && entry.response) {
+        if (chatContainer) {
             // Clear existing messages
             chatContainer.innerHTML = '';
             
-            // Add the AI response - use the global function if available
-            if (window.addMessageToChat) {
-                window.addMessageToChat('assistant', entry.response);
-            } else {
-                const messageElement = document.createElement('div');
-                messageElement.className = 'message ai-message';
-                messageElement.textContent = entry.response;
-                chatContainer.appendChild(messageElement);
-                chatContainer.scrollTop = chatContainer.scrollHeight;
+            // Add the transcript as user message
+            if (entry.transcript && window.addMessageToChat) {
+                window.addMessageToChat('user', entry.transcript);
+                
+                // Extract and display user tags
+                try {
+                    tagExtractor.extractTags(entry.transcript, 8, true).then(tags => {
+                        const userTagsContainer = document.getElementById('userTagsContainer');
+                        if (userTagsContainer && window.displayTags) {
+                            window.displayTags(tags, userTagsContainer);
+                        }
+                    });
+                } catch (e) {
+                    console.error('Error displaying tags for history item:', e);
+                }
+                
+                // Store transcript for potential AI feedback
+                if (!entry.response) {
+                    this.currentHistoryItem = entry;
+                    
+                    // Enable feedback button if no response yet
+                    if (feedbackButton) {
+                        feedbackButton.disabled = false;
+                    }
+                }
             }
+            
+            // Add AI response if available
+            if (entry.response && window.addMessageToChat) {
+                window.addMessageToChat('assistant', entry.response);
+                
+                // Extract and display AI tags
+                try {
+                    tagExtractor.extractTags(entry.response, 8, false).then(tags => {
+                        const aiTagsContainer = document.getElementById('aiTagsContainer');
+                        if (aiTagsContainer && window.displayTags) {
+                            window.displayTags(tags, aiTagsContainer);
+                        }
+                    });
+                } catch (e) {
+                    console.error('Error displaying AI tags for history item:', e);
+                }
+                
+                // Disable feedback button if response exists
+                if (feedbackButton) {
+                    feedbackButton.disabled = true;
+                }
+            }
+            
+            // Scroll to the bottom of the chat
+            chatContainer.scrollTop = chatContainer.scrollHeight;
         }
     }
 }
