@@ -1,6 +1,5 @@
 // Initialize the chat service with an API key
 function initializeChatService() {
-    // Try to get API key from localStorage first
     const savedApiKey = localStorage.getItem('openai_api_key');
     
     if (savedApiKey) {
@@ -8,20 +7,30 @@ function initializeChatService() {
         chatService.setApiKey(savedApiKey);
         transcriptionService.setApiKey(savedApiKey);
         tagExtractor.setApiKey(savedApiKey);
+        verifyApiKey();
     } else {
-        // If no saved API key, prompt the user
         const apiKey = prompt('Please enter your OpenAI API key:');
         if (apiKey) {
             console.log('New API key provided');
             chatService.setApiKey(apiKey);
             transcriptionService.setApiKey(apiKey);
             tagExtractor.setApiKey(apiKey);
-            // Save for future use
             localStorage.setItem('openai_api_key', apiKey);
+            verifyApiKey();
         } else {
             console.error('No API key provided!');
             alert('An OpenAI API key is required to use this application.');
         }
+    }
+}
+
+async function verifyApiKey() {
+    try {
+        // Test API key with a dummy tag extraction call
+        await tagExtractor.extractTags("Test", 1, false);
+    } catch (error) {
+        alert("The API key is invalid. Please enter a valid API key.");
+        promptForApiKey();
     }
 }
 
@@ -38,6 +47,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatContainer = document.getElementById('chatContainer');
     const aiTagsContainer = document.getElementById('aiTagsContainer');
     const feedbackButton = document.getElementById('feedbackButton');
+    
+    // Setup API key edit button listener
+    const editApiKeyButton = document.getElementById('editApiKeyButton');
+    if (editApiKeyButton) {
+        editApiKeyButton.addEventListener('click', () => {
+            const newKey = prompt('Enter a new OpenAI API key:');
+            if (newKey) {
+                localStorage.setItem('openai_api_key', newKey);
+                chatService.setApiKey(newKey);
+                transcriptionService.setApiKey(newKey);
+                tagExtractor.setApiKey(newKey);
+                alert('API key updated successfully.');
+                // Optionally, verify the new API key:
+                verifyApiKey();
+            }
+        });
+    }
     
     // State variables
     let apiKey = localStorage.getItem('openai_api_key');
