@@ -48,21 +48,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const aiTagsContainer = document.getElementById('aiTagsContainer');
     const feedbackButton = document.getElementById('feedbackButton');
     
-    // Setup API key edit button listener
+    // Setup API key edit button listener with additional logging
     const editApiKeyButton = document.getElementById('editApiKeyButton');
     if (editApiKeyButton) {
+        console.log('Edit API Key button found, setting up listener');
         editApiKeyButton.addEventListener('click', () => {
+            console.log('Edit API Key button clicked');
             const newKey = prompt('Enter a new OpenAI API key:');
             if (newKey) {
+                console.log('New API key entered:', newKey);
                 localStorage.setItem('openai_api_key', newKey);
                 chatService.setApiKey(newKey);
                 transcriptionService.setApiKey(newKey);
                 tagExtractor.setApiKey(newKey);
                 alert('API key updated successfully.');
-                // Optionally, verify the new API key:
                 verifyApiKey();
+            } else {
+                console.log('No new API key provided');
             }
         });
+    } else {
+        console.error('Edit API Key button not found');
     }
     
     // State variables
