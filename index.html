@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Echo Life - Voice to AI</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Echo Life</h1>
+            <p>Speak and connect with AI</p>
+        </header>
+        
+        <main>
+            <section class="recording-section">
+                <div class="record-button-container">
+                    <button id="recordButton" class="record-button">
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                    <div id="recordingIndicator" class="recording-indicator hidden">
+                        <div class="wave"></div>
+                        <div class="wave"></div>
+                        <div class="wave"></div>
+                    </div>
+                </div>
+                <p id="recordingStatus">Click to start recording</p>
+            </section>
+            
+            <section class="transcript-section">
+                <h2>Transcript</h2>
+                <div id="transcriptBox" class="transcript-box" contenteditable="true"></div>
+            </section>
+            
+            <section class="chat-section">
+                <h2>AI Response</h2>
+                <div id="chatContainer" class="chat-container">
+                    <!-- Chat messages will appear here -->
+                </div>
+                <button id="submitButton" class="submit-button" disabled>
+                    <i class="fas fa-paper-plane"></i> Submit to AI
+                </button>
+            </section>
+        </main>
+        
+        <footer>
+            <p>Echo Life &copy; 2023</p>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/audio.js"></script>
+    <script src="js/transcription.js"></script>
+    <script src="js/chat.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
