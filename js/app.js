@@ -36,7 +36,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const recordingStatus = document.getElementById('recordingStatus');
     const recordingIndicator = document.getElementById('recordingIndicator');
     const chatContainer = document.getElementById('chatContainer');
-    const userTagsContainer = document.getElementById('userTagsContainer');
     const aiTagsContainer = document.getElementById('aiTagsContainer');
     const feedbackButton = document.getElementById('feedbackButton');
     
@@ -104,8 +103,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
                 
-                // Update for real-time tag extraction
-                handleRealtimeSpeech(partialTranscript + interimTranscript);
+                // Use only the interim transcript for real-time tag extraction
+                handleRealtimeSpeech(interimTranscript);
             };
             
             window.speechRecognition.onerror = (event) => {
@@ -135,8 +134,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // Extract tags from the partial transcript
             const tags = await tagExtractor.extractTagsRealtime(text);
             
-            // Display the tags
-            displayTags(tags, userTagsContainer);
+            // Update word cloud instead of using tag display
+            if (window.wordCloud) {
+                window.wordCloud.updateWordCloud(tags);
+            }
             
             // Enable feedback button if we have speech
             if (recognizedSpeech) {
@@ -157,14 +158,14 @@ document.addEventListener('DOMContentLoaded', () => {
             recognizedSpeech = false;
             tagExtractor.resetContext();
             
-            // Clear existing messages and tags
+            // Clear existing messages
             chatContainer.innerHTML = '';
-            userTagsContainer.innerHTML = '<span class="tag-placeholder">Listening for tags...</span>';
+            
+            // Clear the AI tags display
             aiTagsContainer.innerHTML = '<span class="tag-placeholder">Tags from AI responses will appear here</span>';
             
             const started = await audioRecorder.startRecording();
             if (started) {
-                recordButton.classList.add('recording');
                 recordingStatus.textContent = 'Recording... Click to stop';
                 recordingIndicator.classList.remove('hidden');
                 feedbackButton.disabled = true;
@@ -221,8 +222,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Extract tags from the full transcript
                     const tags = await tagExtractor.extractTags(currentTranscript, 8, true);
                     
-                    // Display tags with confidence indicators
-                    displayTags(tags, userTagsContainer);
+                    // Update word cloud instead of traditional tag display
+                    if (window.wordCloud) {
+                        window.wordCloud.updateWordCloud(tags);
+                    }
                     
                     // Add it to the chat as a user message
                     addMessageToChat('user', currentTranscript);
@@ -275,8 +278,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // Extract tags from AI response
             const aiTags = await tagExtractor.extractTags(response, 8, false);
             
-            // Display AI response tags
-            displayTags(aiTags, aiTagsContainer);
+            // Update word cloud with AI tags
+            if (window.wordCloud) {
+                window.wordCloud.updateWordCloud(aiTags);
+            }
             
             // Add AI response to chat
             addMessageToChat('assistant', response);

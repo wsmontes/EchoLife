@@ -139,9 +139,10 @@ class AudioHandler {
             // Extract tags from user input using tag extractor directly
             try {
                 const tags = await tagExtractor.extractTags(transcription, 8, true);
-                if (window.displayTags) {
-                    const userTagsContainer = document.getElementById('userTagsContainer');
-                    window.displayTags(tags, userTagsContainer);
+                
+                // Update word cloud with tags instead of using traditional tag display
+                if (window.wordCloud) {
+                    window.wordCloud.updateWordCloud(tags);
                 }
             } catch (e) {
                 console.error('Error extracting tags:', e);
@@ -411,18 +412,18 @@ class AudioHandler {
             // Clear existing messages
             chatContainer.innerHTML = '';
             
-            // Add the transcript as user message
+            // Add the transcript as user message and update word cloud with extracted tags
             if (entry.transcript && window.addMessageToChat) {
                 window.addMessageToChat('user', entry.transcript);
-                
-                // Extract and display user tags
+                // Extract tags from the transcript and update the word cloud
                 try {
-                    tagExtractor.extractTags(entry.transcript, 8, true).then(tags => {
-                        const userTagsContainer = document.getElementById('userTagsContainer');
-                        if (userTagsContainer && window.displayTags) {
-                            window.displayTags(tags, userTagsContainer);
-                        }
-                    });
+                    tagExtractor.extractTags(entry.transcript, 8, true)
+                        .then(tags => {
+                            if (window.wordCloud) {
+                                window.wordCloud.updateWordCloud(tags);
+                            }
+                        })
+                        .catch(e => console.error('Error displaying tags for history item:', e));
                 } catch (e) {
                     console.error('Error displaying tags for history item:', e);
                 }
@@ -430,31 +431,26 @@ class AudioHandler {
                 // Store transcript for potential AI feedback
                 if (!entry.response) {
                     this.currentHistoryItem = entry;
-                    
-                    // Enable feedback button if no response yet
                     if (feedbackButton) {
                         feedbackButton.disabled = false;
                     }
                 }
             }
             
-            // Add AI response if available
+            // Add AI response if available and update word cloud with AI tags
             if (entry.response && window.addMessageToChat) {
                 window.addMessageToChat('assistant', entry.response);
-                
-                // Extract and display AI tags
                 try {
-                    tagExtractor.extractTags(entry.response, 8, false).then(tags => {
-                        const aiTagsContainer = document.getElementById('aiTagsContainer');
-                        if (aiTagsContainer && window.displayTags) {
-                            window.displayTags(tags, aiTagsContainer);
-                        }
-                    });
+                    tagExtractor.extractTags(entry.response, 8, false)
+                        .then(tags => {
+                            if (window.wordCloud) {
+                                window.wordCloud.updateWordCloud(tags);
+                            }
+                        })
+                        .catch(e => console.error('Error displaying AI tags for history item:', e));
                 } catch (e) {
                     console.error('Error displaying AI tags for history item:', e);
                 }
-                
-                // Disable feedback button if response exists
                 if (feedbackButton) {
                     feedbackButton.disabled = true;
                 }

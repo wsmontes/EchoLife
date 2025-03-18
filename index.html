@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/audio-upload.css">
+    <link rel="stylesheet" href="css/word-cloud.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 </head>
 <body>
@@ -17,11 +18,28 @@
         </header>
         
         <main>
-            <!-- Tag display sections - moved to top for better visibility -->
-            <section class="tag-section">
-                <h3>Context Tags</h3>
-                <div id="userTagsContainer" class="tag-container">
-                    <span class="tag-placeholder">Tags will appear here when you speak or upload audio</span>
+            <!-- Word Cloud visualization - new prominent section -->
+            <section class="word-cloud-section">
+                <h2>Context Visualization</h2>
+                <div id="wordCloudContainer" class="word-cloud-container">
+                    <div class="word-cloud-placeholder">Words will appear as you speak...</div>
+                    <button class="fullscreen-toggle" id="fullscreenToggle">
+                        <i class="fas fa-expand"></i>
+                    </button>
+                    <div class="word-cloud-legend">
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: var(--high-confidence)"></div>
+                            <span>Important</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: var(--new-context)"></div>
+                            <span>New</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: var(--changing-context)"></div>
+                            <span>Changing</span>
+                        </div>
+                    </div>
                 </div>
             </section>
             
@@ -85,6 +103,7 @@
     <script src="js/transcription.js"></script>
     <script src="js/chat.js"></script>
     <script src="js/audio-handler.js"></script>
+    <script src="js/word-cloud.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
