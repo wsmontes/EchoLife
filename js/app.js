@@ -378,15 +378,15 @@ document.addEventListener('DOMContentLoaded', () => {
             recordButton.disabled = true;
             recordButton.classList.add('processing');
             
-            const audioBlob = await audioRecorder.stopRecording();
+            const audioResult = await audioRecorder.stopRecording();
             
-            if (audioBlob) {
+            if (audioResult && audioResult.blob && audioResult.blob.size > 0) {
                 try {
-                    console.log(`Processing audio recording: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
+                    console.log(`Processing audio recording: ${audioResult.blob.size} bytes, type: ${audioResult.blob.type}`);
                     recordingStatus.textContent = 'Transcribing audio...';
                     
-                    // Get the transcript
-                    currentTranscript = await transcriptionService.transcribeAudio(audioBlob);
+                    // Get the transcript - pass full audioResult object with metadata
+                    currentTranscript = await transcriptionService.transcribeAudio(audioResult);
                     console.log("Transcription result:", currentTranscript ? "Success" : "Empty");
                     
                     // Extract tags from the full transcript
@@ -405,8 +405,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     // Save the recording to history without AI response yet
                     if (window.audioHandler) {
+                        // Create a proper file with the correct extension
+                        let fileExt = 'webm';
+                        if (audioResult.type.includes('mp4') || audioResult.type.includes('m4a')) {
+                            fileExt = 'm4a';
+                        } else if (audioResult.type.includes('mp3')) {
+                            fileExt = 'mp3';
+                        }
+                        
                         window.audioHandler.addRecordingToHistory(
-                            new File([audioBlob], "recording.webm", { type: "audio/webm" }),
+                            new File([audioResult.blob], `recording.${fileExt}`, { type: audioResult.type }),
                             currentTranscript
                         );
                     }

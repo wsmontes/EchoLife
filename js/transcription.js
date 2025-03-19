@@ -1,21 +1,24 @@
 class WhisperTranscriptionService {
     constructor() {
         this.apiKey = null;
-        this.supportedFormats = ['audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/m4a', 'audio/mp4', 'audio/mpeg'];
+        this.supportedFormats = ['audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/m4a', 'audio/mp4', 'audio/aac'];
     }
 
     setApiKey(key) {
         this.apiKey = key;
     }
 
-    // New method to validate audio format
-    validateAudioFormat(audioBlob) {
+    // Enhanced method to validate audio format
+    validateAudioFormat(audioBlob, metadata = {}) {
         if (!audioBlob) {
             throw new Error('No audio data provided');
         }
         
         // Check if the format is supported
-        const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        const isIOSDevice = metadata.isIOS || (/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream);
+        const iosVersion = metadata.iosVersion;
+        
+        console.log(`Validating audio: ${audioBlob.size} bytes, type: ${audioBlob.type}, iOS: ${isIOSDevice}, version: ${iosVersion || 'unknown'}`);
         
         // More permissive check for iOS devices
         if (!this.supportedFormats.includes(audioBlob.type) && audioBlob.type !== '') {
@@ -39,22 +42,54 @@ class WhisperTranscriptionService {
         return true;
     }
 
-    async transcribeAudio(audioBlob) {
+    async transcribeAudio(audioData) {
         if (!this.apiKey) {
             throw new Error('API key not set for Whisper transcription service');
         }
 
+        // Handle both simple blob and metadata object formats
+        let audioBlob, metadata = {};
+        if (audioData.blob && typeof audioData.isIOS !== 'undefined') {
+            // New format with metadata
+            audioBlob = audioData.blob;
+            metadata = {
+                isIOS: audioData.isIOS,
+                iosVersion: audioData.iosVersion,
+                type: audioData.type
+            };
+        } else {
+            // Original format (just the blob)
+            audioBlob = audioData;
+        }
+
         try {
             // Validate audio format
-            this.validateAudioFormat(audioBlob);
+            this.validateAudioFormat(audioBlob, metadata);
             
             console.log(`Transcribing audio: ${audioBlob.size} bytes, format: ${audioBlob.type}`);
             
+            // Determine appropriate file extension based on audio type
+            let fileExtension = 'webm';
+            const type = audioBlob.type.toLowerCase();
+            
+            if (type.includes('mp4') || type.includes('m4a')) {
+                fileExtension = 'm4a';
+            } else if (type.includes('mp3') || type.includes('mpeg')) {
+                fileExtension = 'mp3';
+            } else if (type.includes('wav')) {
+                fileExtension = 'wav';
+            } else if (type.includes('aac')) {
+                fileExtension = 'aac';
+            } else if (metadata.isIOS) {
+                // Safe fallback for iOS
+                fileExtension = 'm4a';
+            }
+            
             const formData = new FormData();
-            formData.append('file', audioBlob, 'recording.webm');
+            formData.append('file', audioBlob, `recording.${fileExtension}`);
             formData.append('model', 'whisper-1');
             
-            console.log('Sending request to Whisper API...');
+            console.log(`Sending request to Whisper API with file extension: .${fileExtension}`);
             const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
                 method: 'POST',
                 headers: {
