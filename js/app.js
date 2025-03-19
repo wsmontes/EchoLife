@@ -4,9 +4,26 @@ function initializeChatService() {
     
     if (savedApiKey) {
         console.log('API key found in localStorage');
-        chatService.setApiKey(savedApiKey);
-        transcriptionService.setApiKey(savedApiKey);
-        tagExtractor.setApiKey(savedApiKey);
+        
+        // Add defensive checks for each service
+        if (typeof chatService !== 'undefined') {
+            chatService.setApiKey(savedApiKey);
+        } else {
+            console.error('Error: chatService is not defined');
+        }
+        
+        if (typeof transcriptionService !== 'undefined') {
+            transcriptionService.setApiKey(savedApiKey);
+        } else {
+            console.error('Error: transcriptionService is not defined');
+        }
+        
+        if (typeof tagExtractor !== 'undefined') {
+            tagExtractor.setApiKey(savedApiKey);
+        } else {
+            console.error('Error: tagExtractor is not defined');
+        }
+        
         verifyApiKey();
     } else {
         const apiKey = prompt('Please enter your OpenAI API key:');
@@ -28,8 +45,23 @@ async function verifyApiKey() {
     try {
         // Test API key with a dummy tag extraction call
         await tagExtractor.extractTags("Test", 1, false);
+        
+        // Also test Whisper API access specifically
+        console.log("Testing Whisper API access...");
+        const whisperTest = await transcriptionService.testWhisperApiAccess();
+        if (!whisperTest.success) {
+            console.warn("Whisper API test failed:", whisperTest.message);
+            // Only alert if it's likely an API permission issue
+            if (whisperTest.message.includes("API key is invalid") || 
+                whisperTest.message.includes("insufficient quota")) {
+                alert(`Warning: ${whisperTest.message} Voice transcription may not work.`);
+            }
+        } else {
+            console.log("Whisper API test passed:", whisperTest.message);
+        }
     } catch (error) {
-        alert("The API key is invalid. Please enter a valid API key.");
+        console.error("API verification failed:", error);
+        alert("The API key is invalid or lacks necessary permissions. Please enter a valid API key.");
         promptForApiKey();
     }
 }
@@ -140,7 +172,16 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             
             window.speechRecognition.onerror = (event) => {
-                console.error('Speech recognition error:', event.error);
+                // Don't treat 'no-speech' as an error - it's a normal outcome when user doesn't speak
+                if (event.error === 'no-speech') {
+                    console.log('No speech detected. Waiting for user to speak...');
+                } else {
+                    console.error('Speech recognition error:', event.error);
+                }
+            };
+            
+            window.speechRecognition.onnomatch = (event) => {
+                console.log('Speech was detected but not recognized.');
             };
             
             console.log('Speech recognition initialized');
@@ -248,8 +289,12 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (audioBlob) {
                 try {
+                    console.log(`Processing audio recording: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
+                    recordingStatus.textContent = 'Transcribing audio...';
+                    
                     // Get the transcript
                     currentTranscript = await transcriptionService.transcribeAudio(audioBlob);
+                    console.log("Transcription result:", currentTranscript ? "Success" : "Empty");
                     
                     // Extract tags from the full transcript
                     const tags = await tagExtractor.extractTags(currentTranscript, 8, true);
@@ -275,6 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch (error) {
                     console.error('Error processing audio:', error);
                     alert('Error: ' + error.message);
+                    recordingStatus.textContent = 'Transcription failed. Try again.';
                     feedbackButton.disabled = true;
                 } finally {
                     // Reset the recording UI

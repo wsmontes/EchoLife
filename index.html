@@ -98,16 +98,59 @@
         
         <footer>
             <p>Echo Life &copy; 2023</p>
+            <!-- Add diagnostic tools section -->
+            <div class="diagnostic-tools" style="margin-top: 10px;">
+                <button id="testWhisperButton" style="padding:4px 8px; background:#f5f5f5; border:1px solid #ddd; border-radius:4px; cursor:pointer; font-size:12px;">
+                    Test Whisper API
+                </button>
+                <div id="testWhisperResult" style="margin-top:5px; font-size:12px; display:none;"></div>
+            </div>
         </footer>
     </div>
 
-    <!-- Scripts -->
-    <script src="js/tag-extractor.js"></script>
+    <!-- Scripts - Updated load order -->
     <script src="js/audio.js"></script>
     <script src="js/transcription.js"></script>
+    <script src="js/tag-extractor.js"></script>
     <script src="js/chat.js"></script>
     <script src="js/audio-handler.js"></script>
     <script src="js/word-cloud.js"></script>
     <script src="js/app.js"></script>
+    <script>
+        // Add diagnostic script for Whisper API testing
+        document.addEventListener('DOMContentLoaded', () => {
+            const testWhisperButton = document.getElementById('testWhisperButton');
+            const testWhisperResult = document.getElementById('testWhisperResult');
+            
+            if (testWhisperButton) {
+                testWhisperButton.addEventListener('click', async () => {
+                    try {
+                        testWhisperButton.disabled = true;
+                        testWhisperButton.textContent = 'Testing...';
+                        testWhisperResult.textContent = '';
+                        testWhisperResult.style.display = 'block';
+                        
+                        // Create and resume AudioContext first on this user interaction
+                        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        if (audioContext.state === 'suspended') {
+                            await audioContext.resume();
+                        }
+                        
+                        const result = await transcriptionService.testWhisperApiAccess();
+                        
+                        testWhisperResult.textContent = result.message;
+                        testWhisperResult.style.color = result.success ? 'green' : 'red';
+                    } catch (e) {
+                        console.error('Test error:', e);
+                        testWhisperResult.textContent = `Test error: ${e.message}`;
+                        testWhisperResult.style.color = 'red';
+                    } finally {
+                        testWhisperButton.disabled = false;
+                        testWhisperButton.textContent = 'Test Whisper API';
+                    }
+                });
+            }
+        });
+    </script>
 </body>
 </html>
