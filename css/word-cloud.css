@@ -106,6 +106,13 @@
     background-color: var(--changing-context);
 }
 
+.word.uncertain {
+    border: 2px dashed rgba(255, 255, 255, 0.5);
+    font-style: italic;
+    opacity: 0.85;
+    animation: pulse-uncertain 3s infinite;
+}
+
 .word-cloud-placeholder {
     position: absolute;
     top: 50%;
@@ -130,6 +137,11 @@
     0% { box-shadow: 0 0 0 0 rgba(156, 39, 176, 0.4); }
     70% { box-shadow: 0 0 0 10px rgba(156, 39, 176, 0); }
     100% { box-shadow: 0 0 0 0 rgba(156, 39, 176, 0); }
+}
+
+@keyframes pulse-uncertain {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(255, 255, 255, 0); }
 }
 
 /* Legend for the word cloud */

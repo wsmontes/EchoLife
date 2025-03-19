@@ -160,7 +160,12 @@ Return a JSON array of objects with "text" and "confidence" properties.`
         if (!this.apiKey || !partialText || partialText.trim().length < 5) {
             return [{text: 'Listening...', confidence: 'low', count: 1, group: "other"}];
         }
+        
         try {
+            // Use context history if available for better continuity
+            const contextPrompt = this.contextHistory.length > 0 ? 
+                "Previous context: " + this.contextHistory.slice(-2).join(" ") : "";
+            
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -172,50 +177,186 @@ Return a JSON array of objects with "text" and "confidence" properties.`
                     messages: [
                         {
                             role: 'system',
-                            content: `Extract up to ${maxTags} key topics from this partial speech. 
-Return only a JSON array of single words or short phrases.`
+                            content: `Extract up to ${maxTags} key topics from this partial speech.
+${contextPrompt}
+For each topic, assess your confidence level based on clarity and context.
+Return a JSON array with objects having:
+- "text": the topic term
+- "confidence": "high", "medium", or "low"
+- "uncertain": true if you're unsure about the meaning/context
+
+Example: [{"text": "machine learning", "confidence": "high"}, 
+          {"text": "neural networks?", "confidence": "low", "uncertain": true}]
+
+Append a question mark to uncertain terms. Be more conservative with confidence levels during partial speech.`
                         },
                         {
                             role: 'user',
                             content: partialText
                         }
                     ],
-                    max_tokens: 50,
+                    max_tokens: 150,
                     temperature: 0.3
                 })
             });
+
             if (!response.ok) {
                 throw new Error('Real-time tag extraction failed');
             }
+
             const data = await response.json();
             let tagResponse = data.choices[0].message.content;
             let tags = [];
+
             try {
                 if (tagResponse.includes('[') && tagResponse.includes(']')) {
                     const jsonString = tagResponse.substring(
                         tagResponse.indexOf('['),
                         tagResponse.lastIndexOf(']') + 1
                     );
+                    
                     const rawTags = JSON.parse(jsonString);
-                    tags = rawTags.map(text => ({
-                        text: text,
-                        confidence: 'medium',
-                        count: 1,
-                        group: this.determineGroup(text)
-                    }));
+                    
+                    // Process the tags to handle uncertainty markers
+                    tags = rawTags.map(tag => {
+                        // Set the base text - if it already has a question mark from the API, use as is
+                        let text = tag.text;
+                        
+                        // Add uncertainty indicator if flagged but not already included
+                        if (tag.uncertain === true && !text.endsWith('?')) {
+                            text = text + '?';
+                        }
+                        
+                        // Normalize confidence
+                        let confidence = tag.confidence ? tag.confidence.toLowerCase() : 'medium';
+                        
+                        // If the term is uncertain, never rate it higher than medium
+                        if (tag.uncertain === true && confidence === 'high') {
+                            confidence = 'medium';
+                        }
+                        
+                        return {
+                            text: text,
+                            confidence: confidence,
+                            count: 1,
+                            group: this.determineGroup(text),
+                            uncertain: tag.uncertain === true
+                        };
+                    });
                 } else {
                     tags = [{text: 'Processing...', confidence: 'low', count: 1, group: "other"}];
                 }
             } catch (e) {
+                console.error('Error parsing real-time tags:', e);
                 tags = [{text: 'Processing...', confidence: 'low', count: 1, group: "other"}];
             }
-            // Merge into our overall tagConfidence store
-            tags = this.trackTagConfidence(tags);
+            
+            // Merge into our overall tagConfidence store with uncertainty handling
+            tags = this.trackTagConfidenceWithUncertainty(tags);
             return tags;
         } catch (error) {
             console.error('Real-time tag extraction error:', error);
             return [{text: 'Listening...', confidence: 'low', count: 1, group: "other"}];
         }
+    }
+    
+    // Enhanced version for tracking confidence with uncertainty handling
+    trackTagConfidenceWithUncertainty(newTags) {
+        const now = Date.now();
+        
+        // Update or add new tags
+        newTags.forEach(tag => {
+            const tagText = tag.text.toLowerCase();
+            const isUncertain = tag.uncertain === true || tagText.endsWith('?');
+            
+            // Base text without question mark for uncertainty
+            const baseText = isUncertain ? tagText.replace(/\?$/, '') : tagText;
+            
+            if (this.tagConfidence.has(baseText)) {
+                let info = this.tagConfidence.get(baseText);
+                
+                // Update count based on confidence and uncertainty
+                if (tag.confidence === 'high' && !isUncertain) {
+                    info.count = info.count + 1.5;  // Boost high confidence terms
+                } else if (tag.confidence === 'low' || isUncertain) {
+                    info.count = info.count + 0.5;  // Reduce impact of uncertain terms
+                } else {
+                    info.count = info.count + 1;  // Medium confidence
+                }
+                
+                // Refresh the timestamp
+                info.lastUpdated = now;
+                
+                // Update confidence level if new one is higher
+                if (tag.confidence === 'high' && info.confidence !== 'high') {
+                    info.confidence = 'high';
+                }
+                
+                // Update uncertain state - if we were uncertain before but now we're certain, remove uncertainty
+                if (info.uncertain && !isUncertain && tag.confidence !== 'low') {
+                    info.uncertain = false;
+                    info.text = baseText; // Remove question mark
+                } 
+                // If we're uncertain now, mark it
+                else if (isUncertain) {
+                    info.uncertain = true;
+                    info.text = baseText + '?'; // Add question mark
+                }
+                
+                // Update group if needed
+                info.group = this.determineGroup(baseText);
+                
+                this.tagConfidence.set(baseText, info);
+            } else {
+                // For new tags, check if there's a version without question mark
+                const textWithoutQuestion = tagText.replace(/\?$/, '');
+                
+                if (isUncertain && this.tagConfidence.has(textWithoutQuestion)) {
+                    // If we already have the base term, just update it to be uncertain
+                    let info = this.tagConfidence.get(textWithoutQuestion);
+                    info.uncertain = true;
+                    info.text = textWithoutQuestion + '?';
+                    info.lastUpdated = now;
+                    this.tagConfidence.set(textWithoutQuestion, info);
+                } else {
+                    // Completely new tag
+                    this.tagConfidence.set(baseText, {
+                        text: isUncertain ? baseText + '?' : baseText,
+                        confidence: tag.confidence,
+                        count: tag.confidence === 'high' ? 1.5 : (tag.confidence === 'low' ? 0.5 : 1),
+                        lastUpdated: now,
+                        group: this.determineGroup(baseText),
+                        uncertain: isUncertain
+                    });
+                }
+            }
+        });
+        
+        // Decay tags that were not refreshed recently
+        for (let [key, info] of this.tagConfidence) {
+            const delta = now - info.lastUpdated;
+            if (delta > this.realtimeDecayThreshold) {
+                // reduce count gradually (e.g. subtract 1 for each threshold period elapsed)
+                const decayUnits = Math.floor(delta / this.realtimeDecayThreshold);
+                info.count = info.count - decayUnits;
+                if (info.count <= 0) {
+                    this.tagConfidence.delete(key);
+                    continue;
+                } else {
+                    // update lastUpdated to a later time so counting is smooth
+                    info.lastUpdated = now - (delta % this.realtimeDecayThreshold);
+                    this.tagConfidence.set(key, info);
+                }
+            }
+        }
+        
+        // Add a special visual indicator class for uncertain terms
+        return Array.from(this.tagConfidence.values()).map(tag => {
+            if (tag.uncertain) {
+                tag.status = 'uncertain';
+            }
+            return tag;
+        });
     }
 }
 

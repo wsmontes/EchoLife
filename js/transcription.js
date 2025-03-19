@@ -1,7 +1,12 @@
 class WhisperTranscriptionService {
     constructor() {
         this.apiKey = null;
-        this.supportedFormats = ['audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/m4a', 'audio/mp4', 'audio/aac'];
+        this.supportedFormats = [
+            'audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 
+            'audio/m4a', 'audio/mp4', 'audio/aac', 'audio/x-m4a'
+        ];
+        this.maxRetries = 2;
+        this.transcriptionError = null;
     }
 
     setApiKey(key) {
@@ -20,13 +25,13 @@ class WhisperTranscriptionService {
         
         console.log(`Validating audio: ${audioBlob.size} bytes, type: ${audioBlob.type}, iOS: ${isIOSDevice}, version: ${iosVersion || 'unknown'}`);
         
-        // More permissive check for iOS devices
+        // More permissive check for iOS devices - accept most formats
         if (!this.supportedFormats.includes(audioBlob.type) && audioBlob.type !== '') {
             console.warn(`Audio format ${audioBlob.type} may not be fully supported by Whisper API. Supported formats include: ${this.supportedFormats.join(', ')}`);
             
             // iOS-specific message
             if (isIOSDevice) {
-                console.log("iOS device detected, attempting to process anyway as Whisper may still accept the format");
+                console.log("iOS device detected - will attempt processing anyway");
             }
         }
         
@@ -36,16 +41,45 @@ class WhisperTranscriptionService {
         }
         
         if (audioBlob.size < 100) {
-            throw new Error('Audio file is too small and may be empty or corrupted');
+            throw new Error('Audio file is too small (less than 100 bytes) and may be empty or corrupted');
         }
         
         return true;
     }
 
-    async transcribeAudio(audioData) {
+    // Try to extract error details from error response
+    parseApiError(response, errorData) {
+        const statusCode = response.status;
+        let errorMessage = 'Transcription failed: ';
+        
+        if (statusCode === 400) {
+            // Common 400 errors for audio issues
+            if (errorData.error?.message?.includes('format')) {
+                errorMessage += 'Invalid audio format. Please try a different recording method.';
+            } else if (errorData.error?.message?.includes('file')) {
+                errorMessage += 'Audio file is invalid or corrupted.';
+            } else {
+                errorMessage += errorData.error?.message || 'Bad request';
+            }
+        } else if (statusCode === 401) {
+            errorMessage += 'API key is invalid or expired. Please update your API key.';
+        } else if (statusCode === 429) {
+            errorMessage += 'Rate limit exceeded or insufficient quota for Whisper API.';
+        } else {
+            errorMessage += errorData.error?.message || response.statusText;
+        }
+        
+        console.error(`API Error (${statusCode}):`, errorData.error || response.statusText);
+        return errorMessage;
+    }
+
+    async transcribeAudio(audioData, retryCount = 0) {
         if (!this.apiKey) {
             throw new Error('API key not set for Whisper transcription service');
         }
+
+        // Clear previous error
+        this.transcriptionError = null;
 
         // Handle both simple blob and metadata object formats
         let audioBlob, metadata = {};
@@ -55,7 +89,9 @@ class WhisperTranscriptionService {
             metadata = {
                 isIOS: audioData.isIOS,
                 iosVersion: audioData.iosVersion,
-                type: audioData.type
+                type: audioData.type,
+                chunks: audioData.chunks,
+                chunkSizes: audioData.chunkSizes
             };
         } else {
             // Original format (just the blob)
@@ -73,7 +109,7 @@ class WhisperTranscriptionService {
             const type = audioBlob.type.toLowerCase();
             
             if (type.includes('mp4') || type.includes('m4a')) {
-                fileExtension = 'm4a';
+                fileExtension = 'mp4';  // Use mp4 instead of m4a for iOS
             } else if (type.includes('mp3') || type.includes('mpeg')) {
                 fileExtension = 'mp3';
             } else if (type.includes('wav')) {
@@ -81,15 +117,22 @@ class WhisperTranscriptionService {
             } else if (type.includes('aac')) {
                 fileExtension = 'aac';
             } else if (metadata.isIOS) {
-                // Safe fallback for iOS
-                fileExtension = 'm4a';
+                // Safe fallback for iOS - always use mp4
+                fileExtension = 'mp4';
             }
             
             const formData = new FormData();
-            formData.append('file', audioBlob, `recording.${fileExtension}`);
+            
+            // Specific filename pattern for iOS
+            const uniqueId = Date.now();
+            const filename = metadata.isIOS ? 
+                `ios${metadata.iosVersion || ''}_recording_${uniqueId}.${fileExtension}` : 
+                `recording_${uniqueId}.${fileExtension}`;
+                
+            formData.append('file', audioBlob, filename);
             formData.append('model', 'whisper-1');
             
-            console.log(`Sending request to Whisper API with file extension: .${fileExtension}`);
+            console.log(`Sending request to Whisper API with filename: ${filename}`);
             const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
                 method: 'POST',
                 headers: {
@@ -102,14 +145,28 @@ class WhisperTranscriptionService {
                 const errorData = await response.json();
                 console.error('Whisper API error:', errorData);
                 
-                // Provide more specific error messages based on status code
-                if (response.status === 401) {
-                    throw new Error('API key is invalid or expired. Please update your API key.');
-                } else if (response.status === 429) {
-                    throw new Error('Rate limit exceeded or insufficient quota for Whisper API.');
-                } else {
-                    throw new Error(`Transcription failed: ${errorData.error?.message || response.statusText}`);
+                // Store detailed error information
+                this.transcriptionError = {
+                    status: response.status,
+                    statusText: response.statusText,
+                    error: errorData.error,
+                    fullError: errorData
+                };
+                
+                // Create better error message
+                const errorMessage = this.parseApiError(response, errorData);
+                
+                // Try again with a different format for iOS if this is our first try
+                if (metadata.isIOS && retryCount === 0) {
+                    console.log("Retrying with different format for iOS...");
+                    
+                    // Try to convert the audio or change its formatting
+                    const newAudioData = await this.reformatAudioForIOS(audioBlob, metadata);
+                    return await this.transcribeAudio(newAudioData, retryCount + 1);
                 }
+                
+                // If we've retried already or this isn't iOS, throw the error
+                throw new Error(errorMessage);
             }
             
             const data = await response.json();
@@ -117,10 +174,92 @@ class WhisperTranscriptionService {
             return data.text;
         } catch (error) {
             console.error('Error transcribing audio:', error);
+            
+            // If this is our first try on iOS, retry with a different approach
+            if (metadata.isIOS && retryCount < this.maxRetries) {
+                console.log(`Retry attempt ${retryCount + 1} for iOS...`);
+                return this.retryTranscriptionWithFallback(audioBlob, metadata, retryCount);
+            }
+            
             throw error;
         }
     }
     
+    // Retry with fallback approaches for iOS
+    async retryTranscriptionWithFallback(audioBlob, metadata, retryCount) {
+        try {
+            // Try a different approach based on retry count
+            const newAudioData = await this.getAlternativeAudioFormat(audioBlob, metadata, retryCount);
+            return await this.transcribeAudio(newAudioData, retryCount + 1);
+        } catch (error) {
+            console.error(`Fallback ${retryCount + 1} failed:`, error);
+            throw new Error(
+                `Transcription failed despite multiple attempts. Latest error: ${error.message}. ` +
+                `For iOS devices, try using the audio upload option instead of recording directly.`
+            );
+        }
+    }
+    
+    // Get alternative formats for retries
+    async getAlternativeAudioFormat(audioBlob, metadata, retryCount) {
+        // For first retry on iOS, try with mp4 extension
+        if (retryCount === 0) {
+            console.log("Attempting first fallback format for iOS");
+            return {
+                blob: audioBlob,
+                type: 'audio/mp4',
+                isIOS: metadata.isIOS,
+                iosVersion: metadata.iosVersion,
+                retry: retryCount + 1
+            };
+        }
+        
+        // For second retry, try using a generic type
+        if (retryCount === 1) {
+            console.log("Attempting second fallback format for iOS");
+            return {
+                blob: audioBlob,
+                type: 'audio/mpeg',
+                isIOS: metadata.isIOS,
+                iosVersion: metadata.iosVersion,
+                retry: retryCount + 1 
+            };
+        }
+        
+        // No more fallbacks
+        throw new Error("All fallback options exhausted");
+    }
+    
+    // Specific iOS reformatting for audio
+    async reformatAudioForIOS(audioBlob, metadata) {
+        console.log("Reformatting audio for iOS compatibility");
+        
+        // Try with a different MIME type based on iOS version
+        let newType;
+        if (metadata.iosVersion >= 18) {
+            newType = 'audio/mp4';
+        } else if (metadata.iosVersion >= 15) {
+            newType = 'audio/m4a';
+        } else {
+            newType = 'audio/mpeg';
+        }
+        
+        // Create a new blob with the same data but different type
+        const newBlob = new Blob([audioBlob], { type: newType });
+        
+        return {
+            blob: newBlob,
+            type: newType,
+            isIOS: metadata.isIOS,
+            iosVersion: metadata.iosVersion
+        };
+    }
+    
+    // Get last transcription error details
+    getLastErrorDetails() {
+        return this.transcriptionError || { message: "No error information available" };
+    }
+
     // New method to test API key and Whisper API access
     async testWhisperApiAccess() {
         if (!this.apiKey) {

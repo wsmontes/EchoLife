@@ -382,7 +382,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (audioResult && audioResult.blob && audioResult.blob.size > 0) {
                 try {
-                    console.log(`Processing audio recording: ${audioResult.blob.size} bytes, type: ${audioResult.blob.type}`);
+                    console.log(`Processing audio recording: ${audioResult.blob.size} bytes, type: ${audioResult.blob.type}, chunks: ${audioResult.chunks || 1}`);
                     recordingStatus.textContent = 'Transcribing audio...';
                     
                     // Get the transcript - pass full audioResult object with metadata
@@ -408,7 +408,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         // Create a proper file with the correct extension
                         let fileExt = 'webm';
                         if (audioResult.type.includes('mp4') || audioResult.type.includes('m4a')) {
-                            fileExt = 'm4a';
+                            fileExt = 'mp4';
                         } else if (audioResult.type.includes('mp3')) {
                             fileExt = 'mp3';
                         }
@@ -420,12 +420,44 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 } catch (error) {
                     console.error('Error processing audio:', error);
-                    alert('Error: ' + error.message);
-                    recordingStatus.textContent = 'Transcription failed. Try again.';
+                    
+                    // Get detailed error information
+                    let errorDetails = "";
+                    if (transcriptionService.getLastErrorDetails) {
+                        const details = transcriptionService.getLastErrorDetails();
+                        if (details.status) {
+                            errorDetails = ` (Error ${details.status}: ${details.error?.message || details.statusText})`;
+                        }
+                    }
+                    
+                    // More iOS-specific error message
+                    let errorMessage = error.message;
+                    if (audioRecorder.isIOS) {
+                        errorMessage += '\n\nOn iOS, direct recording can be problematic. Please try using the upload option below instead.';
+                    }
+                    
+                    alert('Error: ' + errorMessage + errorDetails);
+                    recordingStatus.textContent = 'Transcription failed. Try using the upload option.';
+                    
+                    if (audioRecorder.isIOS) {
+                        // Highlight the upload area for iOS users
+                        const uploadArea = document.querySelector('.audio-drop-area');
+                        if (uploadArea) {
+                            uploadArea.style.borderColor = '#ff5722';
+                            uploadArea.style.backgroundColor = 'rgba(255, 87, 34, 0.05)';
+                            setTimeout(() => {
+                                uploadArea.style.borderColor = '';
+                                uploadArea.style.backgroundColor = '';
+                            }, 3000);
+                        }
+                    }
+                    
                     feedbackButton.disabled = true;
                 } finally {
                     // Reset the recording UI
-                    recordingStatus.textContent = 'Click to start recording';
+                    recordingStatus.textContent = audioRecorder.isIOS ? 
+                        'Click to record (iOS users: upload option recommended)' : 
+                        'Click to start recording';
                     recordButton.disabled = false;
                     recordButton.classList.remove('processing');
                     isProcessingAudio = false;

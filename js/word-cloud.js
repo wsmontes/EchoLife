@@ -114,13 +114,8 @@ class WordCloud {
             }
         }
         
-        // Mapping groups to colors
-        const groupColors = {
-            health: "#28a745",
-            finance: "#007bff",
-            technology: "#6f42c1",
-            other: "#fd7e14"
-        };
+        // Track semantic themes for dynamic color assignment
+        const semanticThemes = this.identifyThemes(tags);
         
         // Create a new Map for tracking current update's words
         const currentUpdate = new Map();
@@ -130,21 +125,30 @@ class WordCloud {
             const text = tag.text.toLowerCase();
             // Determine font size based on count (relevance)
             let fontSize = 14 + (tag.count * 2); // base 14px + 2px per count
+            
             // Determine confidence class for fallback if needed
             let sizeClass = 'word-medium';
             if (tag.confidence === 'high') sizeClass = 'word-high';
             else if (tag.confidence === 'low') sizeClass = 'word-low';
             
-            // Assign group-based styling using groupColors
-            const groupColor = groupColors[tag.group] || 'var(--medium-confidence)';
+            // Get dynamic color based on semantic themes
+            const themeColor = this.getThemeColor(text, semanticThemes);
+            
+            // Build CSS classes including uncertain status if needed
+            let cssClasses = 'word visible';
+            if (tag.status === 'uncertain' || tag.uncertain || text.endsWith('?')) {
+                cssClasses += ' uncertain';
+            }
             
             currentUpdate.set(text, {
-                id: `word-${text.replace(/\s+/g, '-')}`,
+                id: `word-${text.replace(/\s+/g, '-').replace(/\?/g, '')}`,
                 text,
                 fontSize,
-                groupColor,
+                groupColor: themeColor,
                 confidence: tag.confidence,
+                cssClasses: cssClasses,
                 count: tag.count,
+                uncertain: tag.status === 'uncertain' || tag.uncertain || text.endsWith('?'),
                 lastSeen: Date.now()
             });
             
@@ -158,18 +162,29 @@ class WordCloud {
                     // Apply smooth transition for size and color updates
                     wordElement.style.transition = 'all 1s ease-out';
                     wordElement.style.fontSize = `${fontSize}px`;
-                    wordElement.style.backgroundColor = groupColor;
+                    wordElement.style.backgroundColor = themeColor;
+                    
+                    // Update classes for uncertainty
+                    if (tag.status === 'uncertain' || tag.uncertain || text.endsWith('?')) {
+                        wordElement.classList.add('uncertain');
+                    } else {
+                        wordElement.classList.remove('uncertain');
+                    }
+                    
                     existingWord.lastSeen = Date.now();
+                    // Update the stored color and uncertainty
+                    existingWord.groupColor = themeColor;
+                    existingWord.uncertain = tag.status === 'uncertain' || tag.uncertain || text.endsWith('?');
                 }
             } else {
                 // Create new word element
                 const wordElement = document.createElement('div');
-                const wordId = `word-${text.replace(/\s+/g, '-')}`;
+                const wordId = `word-${text.replace(/\s+/g, '-').replace(/\?/g, '')}`;
                 wordElement.id = wordId;
-                wordElement.className = `word visible`;
+                wordElement.className = cssClasses;
                 wordElement.textContent = text;
                 wordElement.style.fontSize = `${fontSize}px`;
-                wordElement.style.backgroundColor = groupColor;
+                wordElement.style.backgroundColor = themeColor;
                 
                 // Position the word randomly initially
                 const position = this.getOptimalPosition(wordElement, sizeClass);
@@ -196,9 +211,10 @@ class WordCloud {
                     id: wordId,
                     text,
                     fontSize,
-                    groupColor,
+                    groupColor: themeColor,
                     confidence: tag.confidence,
                     count: tag.count,
+                    uncertain: tag.status === 'uncertain' || tag.uncertain || text.endsWith('?'),
                     lastSeen: Date.now(),
                     position
                 });
@@ -258,6 +274,167 @@ class WordCloud {
                 this.words.set(text, word);
             }
         }
+    }
+    
+    // New method to identify semantic themes from the current set of tags
+    identifyThemes(tags) {
+        // Create thematic clusters based on word relationships
+        const themes = [];
+        const processedWords = new Set();
+        
+        // Extract themes based on similar words or patterns
+        for (const tag of tags) {
+            if (processedWords.has(tag.text.toLowerCase())) continue;
+            
+            const relatedWords = tags.filter(t => 
+                this.areWordsRelated(tag.text, t.text) && 
+                !processedWords.has(t.text.toLowerCase())
+            ).map(t => t.text.toLowerCase());
+            
+            if (relatedWords.length > 0) {
+                // Add the current word to its related words
+                relatedWords.push(tag.text.toLowerCase());
+                
+                // Mark all these words as processed
+                relatedWords.forEach(word => processedWords.add(word));
+                
+                // Create a new theme with a unique color
+                themes.push({
+                    words: relatedWords,
+                    color: this.generateThemeColor(themes.length)
+                });
+            }
+        }
+        
+        // Handle any remaining unprocessed words
+        const remainingTags = tags.filter(t => !processedWords.has(t.text.toLowerCase()));
+        if (remainingTags.length > 0) {
+            const groupSize = 3; // Group remaining words in small clusters
+            
+            for (let i = 0; i < remainingTags.length; i += groupSize) {
+                const group = remainingTags.slice(i, i + groupSize);
+                const groupWords = group.map(t => t.text.toLowerCase());
+                
+                themes.push({
+                    words: groupWords,
+                    color: this.generateThemeColor(themes.length)
+                });
+                
+                groupWords.forEach(word => processedWords.add(word));
+            }
+        }
+        
+        return themes;
+    }
+    
+    // Check if two words are semantically related
+    areWordsRelated(word1, word2) {
+        if (word1.toLowerCase() === word2.toLowerCase()) return true;
+        
+        // Simple stemming - check if one word starts with the other
+        const w1 = word1.toLowerCase();
+        const w2 = word2.toLowerCase();
+        
+        if (w1.startsWith(w2) || w2.startsWith(w1)) return true;
+        
+        // Check for common prefixes (at least 4 chars)
+        const minPrefixLength = 4;
+        const maxLength = Math.min(w1.length, w2.length);
+        
+        if (maxLength >= minPrefixLength) {
+            const commonPrefix = w1.substring(0, maxLength);
+            if (w2.startsWith(commonPrefix)) return true;
+        }
+        
+        // Check for semantic relationships (could be expanded with NLP libraries)
+        const relationPatterns = [
+            // Same subject areas
+            ['health', 'doctor', 'medical', 'wellness', 'fitness', 'diet'],
+            ['tech', 'computer', 'software', 'programming', 'digital'],
+            ['finance', 'money', 'bank', 'investment', 'stock', 'market'],
+            ['travel', 'vacation', 'trip', 'tour', 'destination'],
+            ['food', 'cooking', 'recipe', 'meal', 'kitchen', 'dining'],
+            ['music', 'song', 'artist', 'band', 'concert'],
+            ['sport', 'game', 'team', 'player', 'competition'],
+            ['work', 'job', 'career', 'office', 'professional']
+        ];
+        
+        for (const pattern of relationPatterns) {
+            const w1Match = pattern.some(term => w1.includes(term));
+            const w2Match = pattern.some(term => w2.includes(term));
+            if (w1Match && w2Match) return true;
+        }
+        
+        return false;
+    }
+    
+    // Generate a visually pleasing color for a theme
+    generateThemeColor(index) {
+        // Vibrant color palette with good contrast and visual appeal
+        const colorPalette = [
+            '#4285F4', // Blue
+            '#EA4335', // Red
+            '#34A853', // Green
+            '#FBBC05', // Yellow
+            '#9C27B0', // Purple
+            '#00BCD4', // Cyan
+            '#FF9800', // Orange
+            '#795548', // Brown
+            '#607D8B', // Blue Gray
+            '#E91E63', // Pink
+            '#3F51B5', // Indigo
+            '#009688', // Teal
+            '#8BC34A', // Light Green
+            '#FFC107', // Amber
+            '#673AB7', // Deep Purple
+            '#FF5722', // Deep Orange
+            '#2196F3', // Light Blue
+            '#CDDC39', // Lime
+        ];
+        
+        // If we have more themes than colors, create variations
+        if (index < colorPalette.length) {
+            return colorPalette[index];
+        } else {
+            // Create a variation of an existing color
+            const baseColor = colorPalette[index % colorPalette.length];
+            return this.adjustColor(baseColor, index);
+        }
+    }
+    
+    // Adjust a color to create a variation
+    adjustColor(hexColor, seed) {
+        // Convert hex to RGB
+        let r = parseInt(hexColor.slice(1, 3), 16);
+        let g = parseInt(hexColor.slice(3, 5), 16);
+        let b = parseInt(hexColor.slice(5, 7), 16);
+        
+        // Adjust each component based on seed
+        const adjust = (value, amount) => {
+            return Math.max(0, Math.min(255, value + amount));
+        };
+        
+        r = adjust(r, (seed * 13) % 60 - 30);
+        g = adjust(g, (seed * 17) % 60 - 30);
+        b = adjust(b, (seed * 19) % 60 - 30);
+        
+        // Convert back to hex
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
+    
+    // Get the color for a word based on its theme
+    getThemeColor(word, themes) {
+        word = word.toLowerCase();
+        
+        // Find which theme the word belongs to
+        for (const theme of themes) {
+            if (theme.words.includes(word)) {
+                return theme.color;
+            }
+        }
+        
+        // Default color if no theme is found
+        return '#757575'; // Gray
     }
     
     // Find an optimal position for a word that minimizes overlaps
