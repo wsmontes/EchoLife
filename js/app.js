@@ -68,6 +68,18 @@ async function verifyApiKey() {
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Initializing application...');
+    
+    // Check for iOS and show recommendation if needed
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS) {
+        console.log("iOS device detected, setting device-specific accommodations");
+        // Add a note for iOS users in the recording section
+        const recordingStatus = document.getElementById('recordingStatus');
+        if (recordingStatus) {
+            recordingStatus.innerHTML = 'Click to start recording<br><small>iOS users: If recording fails, try the upload option below</small>';
+        }
+    }
+    
     initializeChatService();
     
     console.log('Audio interface initialized');
@@ -155,7 +167,35 @@ document.addEventListener('DOMContentLoaded', () => {
             window.speechRecognition.interimResults = true;
             window.speechRecognition.lang = 'en-US';
             
+            // Add tracking for speech recognition health
+            window.lastSpeechRecognitionEvent = Date.now();
+            window.speechRecognitionActive = false;
+            
+            window.speechRecognition.onstart = () => {
+                console.log('Speech recognition started');
+                window.speechRecognitionActive = true;
+                window.lastSpeechRecognitionEvent = Date.now();
+            };
+            
+            window.speechRecognition.onend = () => {
+                console.log('Speech recognition ended');
+                window.speechRecognitionActive = false;
+                
+                // Auto-restart if we're still recording
+                if (audioRecorder.isRecording && !isProcessingAudio) {
+                    console.log('Auto-restarting speech recognition');
+                    try {
+                        window.speechRecognition.start();
+                    } catch (e) {
+                        console.error('Error restarting speech recognition:', e);
+                    }
+                }
+            };
+            
             window.speechRecognition.onresult = (event) => {
+                // Update the last event timestamp
+                window.lastSpeechRecognitionEvent = Date.now();
+                
                 let interimTranscript = '';
                 
                 for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -177,6 +217,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.log('No speech detected. Waiting for user to speak...');
                 } else {
                     console.error('Speech recognition error:', event.error);
+                    
+                    // Restart on certain errors
+                    if (event.error === 'network' || event.error === 'service-not-allowed') {
+                        if (audioRecorder.isRecording) {
+                            console.log('Attempting to restart speech recognition after error');
+                            setTimeout(() => {
+                                try {
+                                    window.speechRecognition.stop();
+                                    window.speechRecognition.start();
+                                } catch (e) {
+                                    console.error('Failed to restart speech recognition:', e);
+                                }
+                            }, 1000);
+                        }
+                    }
                 }
             };
             
@@ -184,7 +239,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log('Speech was detected but not recognized.');
             };
             
-            console.log('Speech recognition initialized');
+            // Add a health check interval to monitor speech recognition
+            window.speechRecognitionHealthCheck = setInterval(() => {
+                if (audioRecorder.isRecording && !isProcessingAudio) {
+                    const timeSinceLastEvent = Date.now() - window.lastSpeechRecognitionEvent;
+                    
+                    // If no events for more than 10 seconds and we're still supposed to be recording,
+                    // restart the speech recognition
+                    if (timeSinceLastEvent > 10000) {
+                        console.log('Speech recognition appears to be stalled, restarting...');
+                        try {
+                            window.speechRecognition.stop();
+                            setTimeout(() => {
+                                try {
+                                    window.speechRecognition.start();
+                                } catch (e) {
+                                    console.error('Failed to restart stalled speech recognition:', e);
+                                }
+                            }, 500);
+                        } catch (e) {
+                            console.error('Error stopping stalled speech recognition:', e);
+                        }
+                    }
+                }
+            }, 5000);
+            
+            console.log('Speech recognition initialized with health monitoring');
         } else {
             console.warn('Speech recognition not supported - will use periodic updates instead');
         }
@@ -246,9 +326,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Start real-time speech recognition if available
                 if (window.speechRecognition) {
                     try {
+                        // Reset timestamps before starting
+                        window.lastSpeechRecognitionEvent = Date.now();
                         window.speechRecognition.start();
                     } catch (e) {
                         console.error('Error starting speech recognition:', e);
+                        // If it failed due to already running, try to stop and restart
+                        if (e.name === 'InvalidStateError') {
+                            try {
+                                window.speechRecognition.stop();
+                                setTimeout(() => {
+                                    window.speechRecognition.start();
+                                }, 500);
+                            } catch (stopError) {
+                                console.error('Error stopping/restarting speech recognition:', stopError);
+                            }
+                        }
                     }
                 } else {
                     // Fallback: periodic updates for tags
@@ -438,4 +531,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // Make these functions available globally
     window.addMessageToChat = addMessageToChat;
     window.displayTags = displayTags;
+
+    // Clean up when the page is unloaded
+    window.addEventListener('beforeunload', () => {
+        if (window.speechRecognitionHealthCheck) {
+            clearInterval(window.speechRecognitionHealthCheck);
+        }
+        
+        // Stop speech recognition if it's active
+        if (window.speechRecognition && window.speechRecognitionActive) {
+            try {
+                window.speechRecognition.stop();
+            } catch (e) {
+                console.error('Error stopping speech recognition on page unload:', e);
+            }
+        }
+    });
 });

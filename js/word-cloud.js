@@ -11,6 +11,7 @@ class WordCloud {
         this.containerHeight = this.container.clientHeight;
         this.isFullscreen = false;
         this.collisionDetection = true;
+        this.lastUpdateTime = Date.now(); // Track last update time
         
         // Setup fullscreen toggle
         const fullscreenToggle = document.getElementById('fullscreenToggle');
@@ -23,6 +24,47 @@ class WordCloud {
         
         // Remove placeholder on first data
         this.placeholderRemoved = false;
+        
+        // Setup health indicator
+        this.setupHealthIndicator();
+        
+        // Setup heartbeat to ensure the cloud stays responsive
+        this.heartbeatInterval = setInterval(() => this.checkHealth(), 5000);
+    }
+    
+    setupHealthIndicator() {
+        // Add a small indicator to show when updates happen
+        this.healthIndicator = document.createElement('div');
+        this.healthIndicator.style.position = 'absolute';
+        this.healthIndicator.style.bottom = '5px';
+        this.healthIndicator.style.right = '5px';
+        this.healthIndicator.style.width = '8px';
+        this.healthIndicator.style.height = '8px';
+        this.healthIndicator.style.borderRadius = '50%';
+        this.healthIndicator.style.backgroundColor = 'gray';
+        this.healthIndicator.style.transition = 'background-color 0.5s';
+        this.healthIndicator.style.opacity = '0.5';
+        this.container.appendChild(this.healthIndicator);
+    }
+    
+    // Show a visual update indicator and check health
+    checkHealth() {
+        // Check if we've had updates recently
+        const timeSinceLastUpdate = Date.now() - this.lastUpdateTime;
+        
+        // If no updates for over 15 seconds during recording, 
+        // add a small fallback update to keep things fresh
+        if (timeSinceLastUpdate > 15000 && window.audioRecorder && window.audioRecorder.isRecording) {
+            console.log('No word cloud updates for 15s during recording - triggering heartbeat update');
+            
+            // Try to trigger a small update if we can
+            if (window.partialTranscript && window.tagExtractor && typeof window.updateRealtimeTags === 'function') {
+                window.updateRealtimeTags(window.partialTranscript);
+            } else {
+                // Just do a refresh of current words as a fallback
+                this.updateWordCloud(Array.from(this.words.values()), true);
+            }
+        }
     }
     
     toggleFullscreen() {
@@ -51,6 +93,17 @@ class WordCloud {
     // Updates the word cloud with new tags
     async updateWordCloud(tags, isResizing = false) {
         if (!this.container) return;
+        
+        // Update last update time
+        this.lastUpdateTime = Date.now();
+        
+        // Show update activity in health indicator
+        if (this.healthIndicator) {
+            this.healthIndicator.style.backgroundColor = '#4CAF50';
+            setTimeout(() => {
+                this.healthIndicator.style.backgroundColor = 'gray';
+            }, 500);
+        }
         
         // Remove placeholder if it's still there
         if (!this.placeholderRemoved && tags.length > 0) {

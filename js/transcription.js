@@ -15,13 +15,25 @@ class WhisperTranscriptionService {
         }
         
         // Check if the format is supported
+        const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        
+        // More permissive check for iOS devices
         if (!this.supportedFormats.includes(audioBlob.type) && audioBlob.type !== '') {
-            console.warn(`Audio format ${audioBlob.type} may not be supported by Whisper API. Supported formats include: ${this.supportedFormats.join(', ')}`);
+            console.warn(`Audio format ${audioBlob.type} may not be fully supported by Whisper API. Supported formats include: ${this.supportedFormats.join(', ')}`);
+            
+            // iOS-specific message
+            if (isIOSDevice) {
+                console.log("iOS device detected, attempting to process anyway as Whisper may still accept the format");
+            }
         }
         
         // Check file size (Whisper has a 25MB limit)
         if (audioBlob.size > 25 * 1024 * 1024) {
             throw new Error('Audio file exceeds the 25MB size limit for Whisper API');
+        }
+        
+        if (audioBlob.size < 100) {
+            throw new Error('Audio file is too small and may be empty or corrupted');
         }
         
         return true;
