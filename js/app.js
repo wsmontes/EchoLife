@@ -135,6 +135,19 @@ document.addEventListener('DOMContentLoaded', () => {
     recordButton.addEventListener('click', toggleRecording);
     feedbackButton.addEventListener('click', requestAIFeedback);
     
+    // Export buttons
+    const exportTxtBtn = document.getElementById('exportTxtBtn');
+    const exportSrtBtn = document.getElementById('exportSrtBtn');
+    const exportAudioBtn = document.getElementById('exportAudioBtn');
+    
+    // Last processed audio result (for export)
+    let lastAudioResult = null;
+    
+    // Add export button event listeners
+    if (exportTxtBtn) exportTxtBtn.addEventListener('click', exportTranscriptAsTxt);
+    if (exportSrtBtn) exportSrtBtn.addEventListener('click', exportTranscriptAsSrt);
+    if (exportAudioBtn) exportAudioBtn.addEventListener('click', exportAudio);
+    
     // Functions
     function promptForApiKey() {
         const key = prompt('Please enter your OpenAI API key:');
@@ -350,6 +363,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         // which isn't currently available
                     }, 3000);
                 }
+                
+                // Disable export buttons when starting a new recording
+                if (exportTxtBtn) exportTxtBtn.disabled = true;
+                if (exportSrtBtn) exportSrtBtn.disabled = true;
+                if (exportAudioBtn) exportAudioBtn.disabled = true;
+                lastAudioResult = null;
+                
             } else {
                 alert('Could not access microphone. Please check permissions.');
             }
@@ -418,6 +438,15 @@ document.addEventListener('DOMContentLoaded', () => {
                             currentTranscript
                         );
                     }
+                    
+                    // Store audio result for export
+                    lastAudioResult = audioResult;
+                    
+                    // Enable export buttons
+                    if (exportTxtBtn) exportTxtBtn.disabled = false;
+                    if (exportSrtBtn) exportSrtBtn.disabled = false;
+                    if (exportAudioBtn) exportAudioBtn.disabled = false;
+                    
                 } catch (error) {
                     console.error('Error processing audio:', error);
                     
@@ -571,6 +600,180 @@ document.addEventListener('DOMContentLoaded', () => {
     // Make these functions available globally
     window.addMessageToChat = addMessageToChat;
     window.displayTags = displayTags;
+
+    // Functions to handle exports
+    
+    // Export transcript as TXT
+    async function exportTranscriptAsTxt() {
+        if (!currentTranscript) return;
+        
+        const filename = `transcript_${getTimestamp()}.txt`;
+        const content = currentTranscript;
+        
+        // Use Web Share API on mobile devices if available
+        if (navigator.canShare && isNativeMobileDevice()) {
+            try {
+                const file = new File([content], filename, { type: 'text/plain' });
+                
+                if (navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        files: [file],
+                        title: 'Transcript',
+                        text: 'Transcript from Echo Life'
+                    });
+                    return;
+                }
+            } catch (error) {
+                console.error('Error sharing:', error);
+                // Fall back to download method if sharing fails
+            }
+        }
+        
+        // Standard download for desktop browsers
+        downloadFile(content, filename, 'text/plain');
+    }
+    
+    // Export transcript as SRT
+    async function exportTranscriptAsSrt() {
+        if (!currentTranscript) return;
+        
+        // Create SRT formatted content
+        const srtContent = generateSrtFromTranscript(currentTranscript);
+        const filename = `captions_${getTimestamp()}.srt`;
+        
+        // Use Web Share API on mobile devices if available
+        if (navigator.canShare && isNativeMobileDevice()) {
+            try {
+                const file = new File([srtContent], filename, { type: 'text/plain' });
+                
+                if (navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        files: [file],
+                        title: 'Subtitles',
+                        text: 'Subtitles from Echo Life'
+                    });
+                    return;
+                }
+            } catch (error) {
+                console.error('Error sharing:', error);
+                // Fall back to download method if sharing fails
+            }
+        }
+        
+        // Standard download for desktop browsers
+        downloadFile(srtContent, filename, 'text/plain');
+    }
+    
+    // Export audio
+    async function exportAudio() {
+        if (!lastAudioResult || !lastAudioResult.blob) return;
+        
+        const blob = lastAudioResult.blob;
+        let fileExt = 'webm';
+        
+        // Get proper extension based on the audio type
+        if (lastAudioResult.type.includes('mp4') || lastAudioResult.type.includes('m4a')) {
+            fileExt = 'mp4';
+        } else if (lastAudioResult.type.includes('mp3')) {
+            fileExt = 'mp3';
+        }
+        
+        const filename = `recording_${getTimestamp()}.${fileExt}`;
+        
+        // Use Web Share API on mobile devices if available
+        if (navigator.canShare && isNativeMobileDevice()) {
+            try {
+                const file = new File([blob], filename, { type: lastAudioResult.type });
+                
+                if (navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        files: [file],
+                        title: 'Audio Recording',
+                        text: 'Recording from Echo Life'
+                    });
+                    return;
+                }
+            } catch (error) {
+                console.error('Error sharing audio:', error);
+                // Fall back to download method if sharing fails
+            }
+        }
+        
+        // Standard download for desktop browsers
+        downloadFile(blob, filename, lastAudioResult.type);
+    }
+    
+    // Helper to generate SRT format
+    function generateSrtFromTranscript(transcript) {
+        // Split the transcript into sentences
+        const sentences = transcript.match(/[^.!?]+[.!?]+/g) || [transcript];
+        let srtContent = '';
+        
+        // Estimate 3 words per second for timing
+        const wordsPerSecond = 3;
+        let startTime = 0;
+        
+        sentences.forEach((sentence, index) => {
+            const wordCount = sentence.split(/\s+/).length;
+            const duration = wordCount / wordsPerSecond;
+            const endTime = startTime + duration;
+            
+            // Format timestamps for SRT (00:00:00,000)
+            const startTimeFormatted = formatSrtTime(startTime);
+            const endTimeFormatted = formatSrtTime(endTime);
+            
+            // Add SRT entry
+            srtContent += `${index + 1}\n`;
+            srtContent += `${startTimeFormatted} --> ${endTimeFormatted}\n`;
+            srtContent += `${sentence.trim()}\n\n`;
+            
+            // Update start time for next sentence
+            startTime = endTime;
+        });
+        
+        return srtContent;
+    }
+    
+    // Format time for SRT (00:00:00,000)
+    function formatSrtTime(seconds) {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = Math.floor(seconds % 60);
+        const ms = Math.floor((seconds % 1) * 1000);
+        
+        return `${hours.toString().padStart(2, '0')}:${
+            minutes.toString().padStart(2, '0')}:${
+            secs.toString().padStart(2, '0')},${
+            ms.toString().padStart(3, '0')}`;
+    }
+    
+    // Helper to create download
+    function downloadFile(content, filename, contentType) {
+        const a = document.createElement('a');
+        const file = new Blob([content], { type: contentType });
+        a.href = URL.createObjectURL(file);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        
+        // Clean up
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+        }, 100);
+    }
+    
+    // Helper to generate timestamp string
+    function getTimestamp() {
+        const now = new Date();
+        return now.toISOString().replace(/[:.]/g, '-').substring(0, 19);
+    }
+    
+    // Helper to detect if this is a native mobile device (iOS/Android)
+    function isNativeMobileDevice() {
+        const userAgent = navigator.userAgent.toLowerCase();
+        return /iphone|ipad|ipod|android/.test(userAgent);
+    }
 
     // Clean up when the page is unloaded
     window.addEventListener('beforeunload', () => {
