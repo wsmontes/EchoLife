@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Echo Life - Voice to AI</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/audio-upload.css">
+    <link rel="stylesheet" href="css/word-cloud.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <!-- Add MP4Box.js for MP4 container manipulation -->
+    <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <!-- Header top with left and right sections -->
+            <div class="header-top" style="display: flex; justify-content: space-between; align-items: center;">
+                <!-- Left: language select and translation toggle -->
+                <div class="header-left" style="display: flex; align-items: center; gap: 10px;">
+                    <div class="language-selector-container">
+                        <select id="languageSelector" class="language-selector">
+                            <option value="en-US">ENG</option>
+                            <option value="pt-BR">PT-BR</option>
+                        </select>
+                    </div>
+                    <!-- Translation toggle without visible label, using tooltip via title attribute -->
+                    <div class="translation-toggle-container">
+                        <label class="toggle-switch" title="Toggle auto-translate">
+                            <input type="checkbox" id="translationToggle">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+                <!-- Right: small API key button -->
+                <div class="header-right">
+                    <button id="editApiKeyButton" style="padding:6px 12px; border:none; background: var(--accent-color); color: white; border-radius:4px; cursor:pointer;">
+                        Edit API Key
+                    </button>
+                </div>
+            </div>
+            <h1>Echo Life</h1>
+            <!-- Changed subtitle to a clever one -->
+            <p>Let your voice spark tomorrow’s conversation</p>
+        </header>
+        
+        <main>
+            <!-- Word Cloud visualization - without explicit title -->
+            <section class="word-cloud-section">
+                <div id="wordCloudContainer" class="word-cloud-container">
+                    <div class="word-cloud-placeholder">Words will appear as you speak...</div>
+                    <button class="fullscreen-toggle" id="fullscreenToggle">
+                        <i class="fas fa-expand"></i>
+                    </button>
+                </div>
+            </section>
+            
+            <section class="recording-section">
+                <div class="record-button-container">
+                    <button id="recordButton" class="record-button">
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                    <div id="recordingIndicator" class="recording-indicator hidden">
+                        <div class="wave"></div>
+                        <div class="wave"></div>
+                        <div class="wave"></div>
+                    </div>
+                </div>
+                <p id="recordingStatus">Click to start recording</p>
+            </section>
+            
+            <!-- Simplified Audio drop area section -->
+            <section class="audio-drop-section">
+                <h2>Upload Audio</h2>
+                <div id="audio-upload-placeholder"></div>
+                <div class="upload-formats-info">
+                    <p>Supported formats: MP3, WAV, M4A, AAC, OPUS, OGG</p>
+                    <p class="whatsapp-hint">WhatsApp voice messages are fully supported.</p>
+                </div>
+            </section>
+            
+            <section class="chat-section">
+                <h2>AI Response</h2>
+                <div id="chatContainer" class="chat-container">
+                    <!-- Chat messages will appear here -->
+                </div>
+                <!-- New Feedback button -->
+                <button id="feedbackButton" class="feedback-button" disabled>
+                    <i class="fas fa-comment-dots"></i> Get AI Feedback
+                </button>
+                
+                <!-- Export options -->
+                <div class="export-container">
+                    <h3>Export Options</h3>
+                    <div class="export-buttons">
+                        <button id="exportTxtBtn" class="export-button" disabled>
+                            <i class="fas fa-file-alt"></i> Export TXT
+                        </button>
+                        <button id="exportSrtBtn" class="export-button" disabled>
+                            <i class="fas fa-closed-captioning"></i> Export SRT
+                        </button>
+                        <button id="exportAudioBtn" class="export-button" disabled>
+                            <i class="fas fa-file-audio"></i> Export Audio
+                        </button>
+                        <button id="exportVideoBtn" class="export-button" disabled>
+                            <i class="fas fa-film"></i> Export Video+Subs
+                        </button>
+                    </div>
+                    
+                    <!-- Subtitle Preview Player -->
+                    <div id="subtitlePreviewContainer" class="subtitle-preview-container" style="display: none;">
+                        <h4>Subtitle Preview</h4>
+                        <div class="audio-player-container">
+                            <audio id="previewAudioPlayer" controls></audio>
+                            <div id="previewSubtitleDisplay" class="subtitle-display">Subtitles will appear here during playback</div>
+                        </div>
+                        <button id="closePreviewBtn" class="close-preview-button">
+                            <i class="fas fa-times"></i> Close Preview
+                        </button>
+                    </div>
+                    
+                    <div class="preview-button-container">
+                        <button id="previewSubtitlesBtn" class="preview-button" disabled>
+                            <i class="fas fa-play-circle"></i> Preview with Subtitles
+                        </button>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- AI tag section - moved here after the chat -->
+            <section class="tag-section">
+                <h3>AI Response Tags</h3>
+                <div id="aiTagsContainer" class="tag-container">
+                    <span class="tag-placeholder">Tags from AI responses will appear here</span>
+                </div>
+            </section>
+
+            <!-- Audio history section -->
+            <section class="audio-history-section">
+                <h2>Recent Audios</h2>
+                <div id="audioHistoryContainer" class="audio-history-container">
+                    <!-- Recently uploaded audio files will appear here -->
+                    <p class="empty-history-message">Your uploaded audio history will appear here</p>
+                </div>
+            </section>
+        </main>
+        
+        <footer>
+            <p>Echo Life &copy; 2023</p>
+            <!-- Add diagnostic tools section -->
+            <div class="diagnostic-tools" style="margin-top: 10px;">
+                <button id="testWhisperButton" style="padding:4px 8px; background:#f5f5f5; border:1px solid #ddd; border-radius:4px; cursor:pointer; font-size:12px;">
+                    Test Whisper API
+                </button>
+                <div id="testWhisperResult" style="margin-top:5px; font-size:12px; display:none;"></div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Scripts - Updated load order -->
+    <script src="js/translations.js"></script>
+    <script src="js/translation-controller.js"></script>
+    <script src="js/audio.js"></script>
+    <script src="js/ios-speech.js"></script>  <!-- Add the iOS speech service before transcription -->
+    <script src="js/transcription.js"></script>
+    <script src="js/tag-extractor.js"></script>
+    <script src="js/chat.js"></script>
+    <script src="js/audio-handler.js"></script>
+    <script src="js/word-cloud.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/diagnostic-tools.js"></script> <!-- Add diagnostic tools at the end -->
+</body>
+</html>
