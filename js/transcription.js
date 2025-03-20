@@ -196,17 +196,17 @@ class WhisperTranscriptionService {
             
             console.log(`Transcribing audio: ${audioBlob.size} bytes, format: ${audioBlob.type || 'unknown'}, iOS: ${metadata.isIOS || false}`);
             
-            // If this is an iOS device and doesn't have a MIME type, try to force one
-            if (metadata.isIOS && (!audioBlob.type || audioBlob.type === '')) {
-                console.log("iOS device with no MIME type - creating new blob with explicit type");
+            // MODIFIED: Enhanced handling for iOS - always try to enforce a known MIME type for better Whisper compatibility
+            if (metadata.isIOS || (!audioBlob.type || audioBlob.type === '')) {
+                console.log("iOS device or empty MIME type - creating new blob with explicit type");
                 try {
                     // Create a new blob with an explicit MIME type that Whisper handles well
                     audioBlob = new Blob([audioBlob], { 
                         type: metadata.preferredFormatForWhisper || 'audio/mp4' 
                     });
-                    console.log(`Rewrapped iOS audio with type: ${audioBlob.type}`);
+                    console.log(`Rewrapped audio with type: ${audioBlob.type}`);
                 } catch (e) {
-                    console.error("Failed to rewrap iOS audio:", e);
+                    console.error("Failed to rewrap audio:", e);
                 }
             }
             

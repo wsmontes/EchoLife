@@ -10,11 +10,9 @@ class AudioRecorder {
         this.iosVersion = this.getIOSVersion();
         this.isIOSProblem = this.isIOS && (this.iosVersion >= 17); // iOS 17+ has specific audio issues
         
-        // Flag to indicate if browser transcription might be more reliable than Whisper
-        this.preferBrowserTranscription = this.isIOS && (this.iosVersion >= 16);
-        
-        // Flag to indicate whether we should use iOS native speech recognition
-        this.useIOSSpeech = this.isIOS && window.iosSpeechService && window.iosSpeechService.isAvailable;
+        // MODIFIED: Force Whisper on iOS by setting these to false
+        this.preferBrowserTranscription = false;
+        this.useIOSSpeech = false;
         
         console.log(`Device detection: iOS: ${this.isIOS}, version: ${this.iosVersion || 'unknown'}, problem device: ${this.isIOSProblem}, prefer browser transcription: ${this.preferBrowserTranscription}, use iOS speech: ${this.useIOSSpeech}`);
         
@@ -626,60 +624,19 @@ class AudioRecorder {
     
     // New method to check if browser transcription should be preferred
     shouldPreferBrowserTranscription() {
-        // Only return true for iOS devices with iOS speech service available
-        return this.isIOS && this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable;
+        // MODIFIED: Always return false to disable browser speech recognition
+        return false;
     }
     
     // New method to get the appropriate transcription service
     getTranscriptionService() {
-        if (this.isIOS && this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable) {
-            return window.iosSpeechService;
-        }
+        // MODIFIED: Always use Whisper transcription service regardless of device
         return window.transcriptionService;
     }
     
     // New method to record audio with the appropriate transcription method
     async startRecordingWithTranscription(callbacks = {}) {
-        // For iOS devices, prioritize using the iOS speech recognition service
-        if (this.isIOS) {
-            // Always try to use iOS native speech recognition first on iOS devices
-            if (window.iosSpeechService && window.iosSpeechService.isAvailable) {
-                // Start audio recording first
-                const success = await this.startRecording();
-                if (success) {
-                    console.log("iOS recording started successfully, setting up speech recognition");
-                    
-                    // Set up callbacks for iOS speech service
-                    if (callbacks.onTranscriptUpdate) {
-                        window.iosSpeechService.setTranscriptUpdateCallback(callbacks.onTranscriptUpdate);
-                    }
-                    if (callbacks.onFinalTranscript) {
-                        window.iosSpeechService.setFinalTranscriptCallback(callbacks.onFinalTranscript);
-                    }
-                    if (callbacks.onError) {
-                        window.iosSpeechService.setErrorCallback(callbacks.onError);
-                    }
-                    
-                    // Start iOS speech recognition and handle potential failures
-                    const speechStarted = window.iosSpeechService.startListening();
-                    this.useIOSSpeech = speechStarted;
-                    
-                    if (!speechStarted) {
-                        console.warn("iOS speech recognition failed to start, falling back to standard recording");
-                    } else {
-                        console.log("iOS speech recognition started successfully");
-                    }
-                    
-                    return true;
-                }
-                return success;
-            } else {
-                console.log("iOS device detected but native speech recognition unavailable");
-                this.useIOSSpeech = false;
-            }
-        }
-        
-        // For non-iOS devices or if iOS speech failed, use regular recording
+        // MODIFIED: Skip iOS speech recognition and always use standard recording
         return this.startRecording();
     }
 
