@@ -326,7 +326,13 @@ class WhisperTranscriptionService {
             return data.text;
         } catch (error) {
             console.error('Error transcribing audio:', error);
-            
+            // Fallback for iOS: if transcription fails, use speech recognition text blocks
+            if (metadata.isIOS) {
+                const fallbackText = (this.speechRecognitionBlocks && this.speechRecognitionBlocks.length)
+                    ? this.speechRecognitionBlocks.join(" ")
+                    : "Fallback transcription not available.";
+                return fallbackText + " (Warning: Could not save audio due to iOS issues.)";
+            }
             throw error;
         }
     }
