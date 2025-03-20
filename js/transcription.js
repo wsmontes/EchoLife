@@ -3,10 +3,22 @@ class WhisperTranscriptionService {
         this.apiKey = null;
         this.supportedFormats = [
             'audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 
-            'audio/m4a', 'audio/mp4', 'audio/aac', 'audio/x-m4a'
+            'audio/m4a', 'audio/mp4', 'audio/aac', 'audio/x-m4a',
+            'audio/ogg', 'audio/opus', 'audio/ogg; codecs=opus' // Add WhatsApp formats
         ];
         this.maxRetries = 2;
         this.transcriptionError = null;
+        
+        // Add file extensions for blob type detection
+        this.formatExtensions = {
+            '.opus': 'audio/ogg; codecs=opus',
+            '.ogg': 'audio/ogg',
+            '.m4a': 'audio/mp4',
+            '.mp3': 'audio/mpeg',
+            '.wav': 'audio/wav',
+            '.aac': 'audio/aac',
+            '.mp4': 'audio/mp4'
+        };
     }
 
     setApiKey(key) {
@@ -23,14 +35,42 @@ class WhisperTranscriptionService {
         const isIOSDevice = metadata.isIOS || (/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream);
         const iosVersion = metadata.iosVersion;
         
-        console.log(`Validating audio: ${audioBlob.size} bytes, type: ${audioBlob.type}, iOS: ${isIOSDevice}, version: ${iosVersion || 'unknown'}`);
+        // Check if this is likely a WhatsApp voice message by file extension or MIME type
+        const isWhatsApp = metadata.isWhatsApp || 
+                          (metadata.filename && 
+                           (metadata.filename.endsWith('.opus') || 
+                            metadata.filename.includes('PTT-') || 
+                            metadata.filename.includes('WhatsApp Audio')));
         
-        // More permissive check for iOS devices - accept most formats
-        if (!this.supportedFormats.includes(audioBlob.type) && audioBlob.type !== '') {
-            console.warn(`Audio format ${audioBlob.type} may not be fully supported by Whisper API. Supported formats include: ${this.supportedFormats.join(', ')}`);
+        console.log(`Validating audio: ${audioBlob.size} bytes, type: ${audioBlob.type}, iOS: ${isIOSDevice}, WhatsApp: ${isWhatsApp}`);
+        
+        // Add better MIME type detection for empty or unknown types
+        let detectedType = audioBlob.type;
+        if (!detectedType || detectedType === '') {
+            // Try to detect type from filename extension
+            if (metadata.filename) {
+                const fileExt = metadata.filename.substring(metadata.filename.lastIndexOf('.')).toLowerCase();
+                if (this.formatExtensions[fileExt]) {
+                    detectedType = this.formatExtensions[fileExt];
+                    console.log(`Detected MIME type ${detectedType} from extension ${fileExt}`);
+                }
+            }
             
-            // iOS-specific message
-            if (isIOSDevice) {
+            // Special handling for WhatsApp voice messages
+            if (isWhatsApp) {
+                detectedType = 'audio/ogg; codecs=opus';
+                console.log('Using WhatsApp voice message format: audio/ogg; codecs=opus');
+            }
+        }
+        
+        // More permissive check for iOS devices and WhatsApp formats - accept most formats
+        if (!this.supportedFormats.includes(detectedType) && detectedType !== '') {
+            console.warn(`Audio format ${detectedType} may not be fully supported by Whisper API. Supported formats include: ${this.supportedFormats.join(', ')}`);
+            
+            // Special message for WhatsApp/iOS
+            if (isWhatsApp) {
+                console.log("WhatsApp audio detected - will attempt processing anyway");
+            } else if (isIOSDevice) {
                 console.log("iOS device detected - will attempt processing anyway");
             }
         }
@@ -91,7 +131,21 @@ class WhisperTranscriptionService {
                 iosVersion: audioData.iosVersion,
                 type: audioData.type,
                 chunks: audioData.chunks,
-                chunkSizes: audioData.chunkSizes
+                chunkSizes: audioData.chunkSizes,
+                isWhatsApp: audioData.isWhatsApp,
+                filename: audioData.filename
+            };
+        } else if (audioData instanceof File) {
+            // Handle File objects directly
+            audioBlob = audioData;
+            metadata = {
+                filename: audioData.name,
+                type: audioData.type,
+                isWhatsApp: audioData.name.endsWith('.opus') || 
+                          audioData.name.includes('PTT-') || 
+                          audioData.name.includes('WhatsApp Audio') ||
+                          audioData.type === 'audio/ogg' ||
+                          audioData.type.includes('opus')
             };
         } else {
             // Original format (just the blob)
@@ -102,14 +156,24 @@ class WhisperTranscriptionService {
             // Validate audio format
             this.validateAudioFormat(audioBlob, metadata);
             
-            console.log(`Transcribing audio: ${audioBlob.size} bytes, format: ${audioBlob.type}`);
+            console.log(`Transcribing audio: ${audioBlob.size} bytes, format: ${audioBlob.type || 'unknown'}`);
             
             // Determine appropriate file extension based on audio type
             let fileExtension = 'webm';
-            const type = audioBlob.type.toLowerCase();
+            let type = audioBlob.type ? audioBlob.type.toLowerCase() : '';
             
+            // Better detection for WhatsApp audio
+            if (metadata.isWhatsApp) {
+                if (metadata.filename && metadata.filename.endsWith('.opus')) {
+                    fileExtension = 'opus';
+                    type = 'audio/ogg; codecs=opus';
+                } else {
+                    fileExtension = 'ogg';
+                    type = 'audio/ogg';
+                }
+            }
             // Force Apple devices to use m4a for QuickTime compatibility
-            if (metadata.isIOS) {
+            else if (metadata.isIOS) {
                 fileExtension = 'm4a';
             } else if (type.includes('mp4') || type.includes('m4a')) {
                 fileExtension = 'mp4';
@@ -119,15 +183,36 @@ class WhisperTranscriptionService {
                 fileExtension = 'wav';
             } else if (type.includes('aac')) {
                 fileExtension = 'aac';
+            } else if (type.includes('ogg') || type.includes('opus')) {
+                fileExtension = 'ogg';
+            } else if (metadata.filename) {
+                // Try to get extension from filename if MIME type is unknown
+                const nameParts = metadata.filename.split('.');
+                if (nameParts.length > 1) {
+                    const ext = nameParts[nameParts.length - 1].toLowerCase();
+                    if (['mp3', 'wav', 'm4a', 'mp4', 'ogg', 'opus', 'aac'].includes(ext)) {
+                        fileExtension = ext;
+                    }
+                }
             }
             
             const formData = new FormData();
             
-            // Specific filename pattern for iOS
+            // Specific filename pattern with format information
             const uniqueId = Date.now();
-            const filename = metadata.isIOS ? 
-                `ios${metadata.iosVersion || ''}_recording_${uniqueId}.${fileExtension}` : 
-                `recording_${uniqueId}.${fileExtension}`;
+            let filename;
+            
+            if (metadata.isWhatsApp) {
+                filename = `whatsapp_${uniqueId}.${fileExtension}`;
+            } else if (metadata.isIOS) {
+                filename = `ios${metadata.iosVersion || ''}_recording_${uniqueId}.${fileExtension}`;
+            } else if (metadata.filename) {
+                // Keep original filename but ensure the extension is correct
+                const baseName = metadata.filename.split('.').slice(0, -1).join('.');
+                filename = `${baseName}_${uniqueId}.${fileExtension}`;
+            } else {
+                filename = `recording_${uniqueId}.${fileExtension}`;
+            }
                 
             formData.append('file', audioBlob, filename);
             formData.append('model', 'whisper-1');

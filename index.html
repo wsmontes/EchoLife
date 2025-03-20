@@ -48,26 +48,13 @@
                 <p id="recordingStatus">Click to start recording</p>
             </section>
             
-            <!-- Audio drop area section - Updated for WhatsApp support -->
+            <!-- Simplified Audio drop area section -->
             <section class="audio-drop-section">
                 <h2>Upload Audio</h2>
                 <div id="audio-upload-placeholder"></div>
-                
-                <!-- WhatsApp voice message upload instructions -->
-                <div class="whatsapp-upload-container">
-                    <h3><i class="fab fa-whatsapp"></i> WhatsApp Voice Messages</h3>
-                    <ol class="whatsapp-instructions">
-                        <li>In WhatsApp, open the voice message chat</li>
-                        <li>Press and hold on the voice message</li>
-                        <li>Tap "Share" or "Forward"</li>
-                        <li>Select "Share to..." or "More"</li>
-                        <li>Choose "Copy" or select this app if available</li>
-                        <li>Paste the file here or use the button below</li>
-                    </ol>
-                    <button id="whatsappUploadBtn" class="whatsapp-upload-btn">
-                        <i class="fab fa-whatsapp"></i> Upload WhatsApp Voice
-                    </button>
-                    <input type="file" id="whatsappFileInput" accept=".opus,.m4a,.mp3,.aac,.wav,.ogg" style="display: none;">
+                <div class="upload-formats-info">
+                    <p>Supported formats: MP3, WAV, M4A, AAC, OPUS, OGG</p>
+                    <p class="whatsapp-hint">WhatsApp voice messages are fully supported.</p>
                 </div>
             </section>
             
@@ -188,26 +175,6 @@
                     } finally {
                         testWhisperButton.disabled = false;
                         testWhisperButton.textContent = 'Test Whisper API';
-                    }
-                });
-            }
-
-            // WhatsApp voice upload handling
-            const whatsappUploadBtn = document.getElementById('whatsappUploadBtn');
-            const whatsappFileInput = document.getElementById('whatsappFileInput');
-            
-            if (whatsappUploadBtn && whatsappFileInput) {
-                whatsappUploadBtn.addEventListener('click', () => {
-                    whatsappFileInput.click();
-                });
-                
-                whatsappFileInput.addEventListener('change', (event) => {
-                    if (event.target.files.length > 0) {
-                        // Use the existing audio handler to process the file
-                        // The audioHandler.handleFileUpload function should exist in audio-handler.js
-                        if (typeof audioHandler !== 'undefined' && audioHandler.handleFileUpload) {
-                            audioHandler.handleFileUpload(event.target.files[0]);
-                        }
                     }
                 });
             }

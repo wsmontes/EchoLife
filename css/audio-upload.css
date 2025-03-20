@@ -274,7 +274,7 @@
 /* Audio drop area styles */
 .audio-drop-area {
     width: 100%;
-    height: 150px;
+    height: 160px; /* Slightly taller to accommodate format info */
     border: 2px dashed #ccc;
     border-radius: 8px;
     display: flex;
@@ -283,7 +283,7 @@
     justify-content: center;
     cursor: pointer;
     transition: all 0.3s ease;
-    margin-bottom: 20px;
+    margin-bottom: 15px;
     position: relative;
 }
 
@@ -350,6 +350,26 @@
 .processing-text {
     color: #7289da;
     font-weight: 600;
+}
+
+.supported-formats {
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 8px;
+}
+
+.upload-formats-info {
+    font-size: 0.85rem;
+    color: #666;
+    text-align: center;
+    margin-top: -10px;
+    margin-bottom: 15px;
+}
+
+.whatsapp-hint {
+    font-size: 0.8rem;
+    color: #128C7E; /* WhatsApp green color */
+    margin-top: 4px;
 }
 
 /* WhatsApp voice message upload styling */

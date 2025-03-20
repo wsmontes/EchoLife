@@ -3,6 +3,7 @@ class AudioHandler {
         this.chatService = chatService;
         this.audioHistory = [];
         this.currentHistoryItem = null; // Track the most recent history item
+        this.whatsAppFormats = ['.opus', '.ogg', 'audio/ogg', 'audio/opus', 'audio/ogg; codecs=opus'];
         this.setupComplete = false;
         // Wait for DOM to be fully loaded before setting up
         if (document.readyState === 'loading') {
@@ -19,7 +20,7 @@ class AudioHandler {
         this.fileInput = document.createElement('input');
         this.fileInput.type = 'file';
         this.fileInput.id = 'audio-file-input';
-        this.fileInput.accept = 'audio/*';
+        this.fileInput.accept = 'audio/*,.opus,.ogg,.m4a,.mp3,.wav,.aac';
         this.fileInput.style.display = 'none';
         this.fileInput.addEventListener('change', (e) => this.handleFileSelection(e));
         document.body.appendChild(this.fileInput);
@@ -49,7 +50,7 @@ class AudioHandler {
         dropArea.id = 'audio-drop-area';
         dropArea.className = 'audio-drop-area';
         
-        // Create content for drop area
+        // Create content for drop area with improved messaging
         dropArea.innerHTML = `
             <div class="drop-icon">
                 <i class="fas fa-microphone"></i>
@@ -58,6 +59,7 @@ class AudioHandler {
                 <p>Drop any audio file here</p>
                 <p>or</p>
                 <p>Click to select a file</p>
+                <p class="supported-formats">MP3, WAV, M4A, AAC, OPUS, OGG (WhatsApp) supported</p>
             </div>
         `;
         
@@ -125,14 +127,28 @@ class AudioHandler {
         }, false);
     }
 
-    async processAudioFile(file, isWhatsApp) {
+    async processAudioFile(file, isWhatsApp = null) {
         try {
-            console.log(`Processing audio file: ${file.name}, WhatsApp: ${isWhatsApp}`);
+            console.log(`Processing audio file: ${file.name}, size: ${file.size}, type: ${file.type}`);
+            
+            // Auto-detect WhatsApp format if not specified
+            if (isWhatsApp === null) {
+                // Check file extension and MIME type to detect WhatsApp formats
+                const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+                isWhatsApp = this.whatsAppFormats.includes(fileExt) || 
+                            this.whatsAppFormats.includes(file.type) ||
+                            file.name.includes('PTT-') || // WhatsApp uses PTT- prefix for voice messages
+                            file.name.includes('WhatsApp Audio');
+                
+                if (isWhatsApp) {
+                    console.log('Detected WhatsApp voice message format');
+                }
+            }
             
             // Show processing state
             this.showProcessingState(true);
             
-            // Get the transcription
+            // Get the transcription - now with auto-detection of WhatsApp format
             const transcription = await this.chatService.importAudio(file, isWhatsApp);
             console.log("Transcription received:", transcription);
             
@@ -227,10 +243,10 @@ class AudioHandler {
         }
         
         const file = event.target.files[0];
-        console.log(`Processing file: ${file.name}`);
+        console.log(`Processing file: ${file.name}, type: ${file.type}`);
         
-        // Process the audio file
-        this.processAudioFile(file, false);
+        // Process the audio file with auto-detection
+        this.processAudioFile(file);
     }
     
     showError(message) {
