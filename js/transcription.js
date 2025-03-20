@@ -108,17 +108,17 @@ class WhisperTranscriptionService {
             let fileExtension = 'webm';
             const type = audioBlob.type.toLowerCase();
             
-            if (type.includes('mp4') || type.includes('m4a')) {
-                fileExtension = 'mp4';  // Use mp4 instead of m4a for iOS
+            // Force Apple devices to use m4a for QuickTime compatibility
+            if (metadata.isIOS) {
+                fileExtension = 'm4a';
+            } else if (type.includes('mp4') || type.includes('m4a')) {
+                fileExtension = 'mp4';
             } else if (type.includes('mp3') || type.includes('mpeg')) {
                 fileExtension = 'mp3';
             } else if (type.includes('wav')) {
                 fileExtension = 'wav';
             } else if (type.includes('aac')) {
                 fileExtension = 'aac';
-            } else if (metadata.isIOS) {
-                // Safe fallback for iOS - always use mp4
-                fileExtension = 'mp4';
             }
             
             const formData = new FormData();
@@ -131,6 +131,9 @@ class WhisperTranscriptionService {
                 
             formData.append('file', audioBlob, filename);
             formData.append('model', 'whisper-1');
+            
+            // Request response_format=verbose_json to get word-level timestamps
+            formData.append('response_format', 'verbose_json');
             
             console.log(`Sending request to Whisper API with filename: ${filename}`);
             const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -170,7 +173,12 @@ class WhisperTranscriptionService {
             }
             
             const data = await response.json();
-            console.log('Transcription successful');
+            console.log('Transcription successful with timestamps');
+            
+            // Store the segment data for subtitle generation
+            this.lastTranscriptionSegments = data.segments || [];
+            
+            // Return the full text
             return data.text;
         } catch (error) {
             console.error('Error transcribing audio:', error);
@@ -363,6 +371,23 @@ class WhisperTranscriptionService {
                     view.setUint8(offset + i, string.charCodeAt(i));
                 }
             }
+        });
+    }
+
+    // Get subtitle data from the last transcription
+    getSubtitleData() {
+        if (!this.lastTranscriptionSegments || this.lastTranscriptionSegments.length === 0) {
+            // Fallback if no segments data is available
+            return null;
+        }
+        
+        // Convert Whisper segments to our subtitle format
+        return this.lastTranscriptionSegments.map(segment => {
+            return {
+                startTime: segment.start,
+                endTime: segment.end,
+                text: segment.text.trim()
+            };
         });
     }
 }

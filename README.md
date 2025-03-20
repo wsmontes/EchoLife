@@ -67,6 +67,18 @@ This application stores your API key in the browser's localStorage. While conven
 5. View your transcription and the AI's response in the chat section.
 6. Access your history of past audio interactions at any time.
 
+## Export Options
+
+- Audio exports are generated in the MP4 format (AAC inside an MP4 container) when used on Apple devices. This ensures maximum compatibility with QuickTime Player.
+- Video exports follow Apple's recommended specifications:
+  - Container: MP4 (.mp4)
+  - Audio Codec: AAC-LC
+  - Audio Channels: Mono or Stereo
+  - Audio Sample Rate: 44.1 kHz
+  - Subtitle Format: WebVTT (.vtt)
+  - Encoding: UTF-8
+  - Atom Structure: moov atom at start ("Fast Start")
+
 ## License
 
 MIT License

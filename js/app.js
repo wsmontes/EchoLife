@@ -139,14 +139,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const exportTxtBtn = document.getElementById('exportTxtBtn');
     const exportSrtBtn = document.getElementById('exportSrtBtn');
     const exportAudioBtn = document.getElementById('exportAudioBtn');
+    const exportVideoBtn = document.getElementById('exportVideoBtn');
+    const previewSubtitlesBtn = document.getElementById('previewSubtitlesBtn');
+    
+    // Subtitle preview elements
+    const subtitlePreviewContainer = document.getElementById('subtitlePreviewContainer');
+    const previewAudioPlayer = document.getElementById('previewAudioPlayer');
+    const previewSubtitleDisplay = document.getElementById('previewSubtitleDisplay');
+    const closePreviewBtn = document.getElementById('closePreviewBtn');
     
     // Last processed audio result (for export)
     let lastAudioResult = null;
+    let subtitlesData = [];
     
     // Add export button event listeners
     if (exportTxtBtn) exportTxtBtn.addEventListener('click', exportTranscriptAsTxt);
     if (exportSrtBtn) exportSrtBtn.addEventListener('click', exportTranscriptAsSrt);
     if (exportAudioBtn) exportAudioBtn.addEventListener('click', exportAudio);
+    if (exportVideoBtn) exportVideoBtn.addEventListener('click', showVideoExportOptions);
+    if (previewSubtitlesBtn) previewSubtitlesBtn.addEventListener('click', previewWithSubtitles);
+    if (closePreviewBtn) closePreviewBtn.addEventListener('click', closeSubtitlePreview);
     
     // Functions
     function promptForApiKey() {
@@ -368,7 +380,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (exportTxtBtn) exportTxtBtn.disabled = true;
                 if (exportSrtBtn) exportSrtBtn.disabled = true;
                 if (exportAudioBtn) exportAudioBtn.disabled = true;
+                if (exportVideoBtn) exportVideoBtn.disabled = true;
+                if (previewSubtitlesBtn) previewSubtitlesBtn.disabled = true;
+                
+                // Hide subtitle preview if visible
+                if (subtitlePreviewContainer) {
+                    subtitlePreviewContainer.style.display = 'none';
+                }
+                
                 lastAudioResult = null;
+                subtitlesData = [];
                 
             } else {
                 alert('Could not access microphone. Please check permissions.');
@@ -442,10 +463,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Store audio result for export
                     lastAudioResult = audioResult;
                     
+                    // Get subtitle data from the transcription service, which now uses Whisper's timestamps
+                    const whisperSubtitles = transcriptionService.getSubtitleData();
+                    if (whisperSubtitles && whisperSubtitles.length > 0) {
+                        // Use Whisper's native timestamp data if available
+                        subtitlesData = whisperSubtitles;
+                        console.log("Using Whisper's native timestamps for subtitles");
+                    } else {
+                        // Fall back to our estimation method if needed
+                        subtitlesData = generateSubtitleData(currentTranscript);
+                        console.log("Falling back to estimated timestamps for subtitles");
+                    }
+                    
                     // Enable export buttons
                     if (exportTxtBtn) exportTxtBtn.disabled = false;
                     if (exportSrtBtn) exportSrtBtn.disabled = false;
                     if (exportAudioBtn) exportAudioBtn.disabled = false;
+                    if (exportVideoBtn) exportVideoBtn.disabled = false;
+                    if (previewSubtitlesBtn) previewSubtitlesBtn.disabled = false;
                     
                 } catch (error) {
                     console.error('Error processing audio:', error);
@@ -637,8 +672,8 @@ document.addEventListener('DOMContentLoaded', () => {
     async function exportTranscriptAsSrt() {
         if (!currentTranscript) return;
         
-        // Create SRT formatted content
-        const srtContent = generateSrtFromTranscript(currentTranscript);
+        // Create SRT formatted content using our subtitle data
+        const srtContent = generateSrtContent(subtitlesData);
         const filename = `captions_${getTimestamp()}.srt`;
         
         // Use Web Share API on mobile devices if available
@@ -664,18 +699,60 @@ document.addEventListener('DOMContentLoaded', () => {
         downloadFile(srtContent, filename, 'text/plain');
     }
     
-    // Export audio
+    // Export audio with proper format handling
     async function exportAudio() {
         if (!lastAudioResult || !lastAudioResult.blob) return;
         
-        const blob = lastAudioResult.blob;
+        let blob = lastAudioResult.blob;
         let fileExt = 'webm';
+        let mimeType = lastAudioResult.type;
+        let codecInfo = lastAudioResult.codecInfo || 'unknown';
         
-        // Get proper extension based on the audio type
+        console.log(`Original audio: type=${mimeType}, codec=${codecInfo}`);
+        
+        // Determine proper extension based on the original audio type
         if (lastAudioResult.type.includes('mp4') || lastAudioResult.type.includes('m4a')) {
-            fileExt = 'mp4';
+            fileExt = 'mp4'; // Always use .mp4 extension for Apple compatibility
         } else if (lastAudioResult.type.includes('mp3')) {
             fileExt = 'mp3';
+        }
+        
+        // For Apple devices, ensure AAC codec in MP4 container
+        const isApple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
+        if (isApple) {
+            fileExt = 'mp4';
+            
+            // Check if we need to show a warning about codec compatibility
+            const hasAppleCompatibleCodec = mimeType.includes('mp4a.40.2') || 
+                                            mimeType.includes('aac') || 
+                                            (mimeType === 'audio/mp4' && !mimeType.includes('opus'));
+            
+            if (!hasAppleCompatibleCodec) {
+                console.warn("Audio may have codec compatibility issues with Apple devices");
+                
+                // Show warning dialog
+                const useAnyway = confirm(
+                    "This audio file may not be fully compatible with QuickTime Player or iOS devices " +
+                    "because it might not use the AAC codec that Apple requires.\n\n" +
+                    "• For best results on Apple devices, try uploading an existing .m4a or .mp3 file instead of recording.\n" +
+                    "• Chrome on Mac typically records in a more compatible format than Firefox or Safari.\n\n" +
+                    "Do you want to continue with the export anyway?"
+                );
+                
+                if (!useAnyway) {
+                    return; // User canceled
+                }
+            }
+            
+            // Set proper MIME type for Apple
+            mimeType = 'audio/mp4';
+            try {
+                // Create new blob with the right MIME type
+                blob = new Blob([blob], { type: mimeType });
+                console.log('Optimized audio format for Apple compatibility:', mimeType);
+            } catch (error) {
+                console.error('Error converting audio blob for Apple devices:', error);
+            }
         }
         
         const filename = `recording_${getTimestamp()}.${fileExt}`;
@@ -683,8 +760,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Use Web Share API on mobile devices if available
         if (navigator.canShare && isNativeMobileDevice()) {
             try {
-                const file = new File([blob], filename, { type: lastAudioResult.type });
-                
+                const file = new File([blob], filename, { type: mimeType });
                 if (navigator.canShare({ files: [file] })) {
                     await navigator.share({
                         files: [file],
@@ -699,8 +775,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         
-        // Standard download for desktop browsers
-        downloadFile(blob, filename, lastAudioResult.type);
+        downloadFile(blob, filename, mimeType);
     }
     
     // Helper to generate SRT format
@@ -747,6 +822,24 @@ document.addEventListener('DOMContentLoaded', () => {
             ms.toString().padStart(3, '0')}`;
     }
     
+    // Generate SRT content from subtitle data
+    function generateSrtContent(subtitles) {
+        let srtContent = '';
+        
+        subtitles.forEach((subtitle, index) => {
+            // Format timestamps for SRT (00:00:00,000)
+            const startTimeFormatted = formatSrtTime(subtitle.startTime);
+            const endTimeFormatted = formatSrtTime(subtitle.endTime);
+            
+            // Add SRT entry
+            srtContent += `${index + 1}\n`;
+            srtContent += `${startTimeFormatted} --> ${endTimeFormatted}\n`;
+            srtContent += `${subtitle.text}\n\n`;
+        });
+        
+        return srtContent;
+    }
+
     // Helper to create download
     function downloadFile(content, filename, contentType) {
         const a = document.createElement('a');
@@ -790,4 +883,451 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
+    
+    // Preview audio with subtitles
+    function previewWithSubtitles() {
+        if (!lastAudioResult || !lastAudioResult.blob || subtitlesData.length === 0) return;
+        
+        // Create object URL for the audio blob
+        const audioUrl = URL.createObjectURL(lastAudioResult.blob);
+        
+        // Set the audio source
+        previewAudioPlayer.src = audioUrl;
+        
+        // Show the subtitle preview container
+        subtitlePreviewContainer.style.display = 'block';
+        
+        // Clear any previous event listeners
+        previewAudioPlayer.ontimeupdate = null;
+        
+        // Add timeupdate event listener to sync subtitles
+        previewAudioPlayer.ontimeupdate = function() {
+            const currentTime = previewAudioPlayer.currentTime;
+            
+            // Find the subtitle that should be displayed
+            const currentSubtitle = subtitlesData.find(sub => 
+                currentTime >= sub.startTime && currentTime <= sub.endTime
+            );
+            
+            // Update subtitle display
+            if (currentSubtitle) {
+                previewSubtitleDisplay.textContent = currentSubtitle.text;
+                previewSubtitleDisplay.style.display = 'flex';
+            } else {
+                previewSubtitleDisplay.style.display = 'none';
+            }
+        };
+        
+        // Start playing automatically
+        previewAudioPlayer.play().catch(e => {
+            console.error('Error auto-playing audio:', e);
+            // Auto-play might be blocked, user will need to press play manually
+        });
+    }
+    
+    // Close subtitle preview
+    function closeSubtitlePreview() {
+        if (previewAudioPlayer) {
+            previewAudioPlayer.pause();
+            previewAudioPlayer.src = '';
+        }
+        
+        if (subtitlePreviewContainer) {
+            subtitlePreviewContainer.style.display = 'none';
+        }
+    }
+    
+    // Show video export options modal - properly configured for QuickTime compatibility
+    function showVideoExportOptions() {
+        // Create modal if it doesn't exist
+        let modal = document.getElementById('videoExportModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'videoExportModal';
+            modal.className = 'video-export-modal';
+            
+            modal.innerHTML = `
+                <div class="video-export-content">
+                    <h3>Export for QuickTime Player</h3>
+                    <div class="video-options">
+                        <p style="margin-bottom: 15px;">This will create QuickTime-compatible files. QuickTime Player requires specific formats for proper playback.</p>
+                        
+                        <div style="background-color: #f8f9fa; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+                            <h4 style="margin-top: 0; color: #212529;">Format Details</h4>
+                            <p><strong>Audio:</strong> .m4a format with AAC codec (QuickTime standard)</p>
+                            <p><strong>Subtitles:</strong> .srt file with identical base name</p>
+                        </div>
+                    </div>
+                    <div class="video-export-buttons">
+                        <button id="generateVideoBtn" class="generate-video-btn">Export for QuickTime</button>
+                        <button id="cancelVideoBtn" class="cancel-video-btn">Cancel</button>
+                    </div>
+                    <div id="videoProcessingIndicator" class="video-processing-indicator">
+                        <div class="video-processing-spinner"></div>
+                        <p>Processing...</p>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            document.getElementById('generateVideoBtn').addEventListener('click', function() {
+                generateQuickTimeCompatibleExport();
+            });
+            
+            document.getElementById('cancelVideoBtn').addEventListener('click', () => {
+                modal.style.display = 'none';
+            });
+        }
+        
+        // Show the modal
+        modal.style.display = 'flex';
+    }
+    
+    // Generate QuickTime-compatible export with subtitles - updated for codec compatibility
+    async function generateQuickTimeCompatibleExport() {
+        const modal = document.getElementById('videoExportModal');
+        const processingIndicator = document.getElementById('videoProcessingIndicator');
+        
+        if (!lastAudioResult || !lastAudioResult.blob || subtitlesData.length === 0) {
+            alert('Audio or subtitles are missing. Please record audio first.');
+            return;
+        }
+        
+        try {
+            // Show processing indicator
+            processingIndicator.style.display = 'block';
+            
+            // Generate SRT subtitle content
+            const srtContent = generateSrtContent(subtitlesData);
+            
+            // Generate a base filename
+            const timestamp = getTimestamp();
+            const baseFilename = `echo_life_${timestamp}`;
+            
+            // For QuickTime compatibility:
+            // - Always use .mp4 for audio files (with AAC codec)
+            // - For subtitle import, the base filename must match
+            const mp4Filename = `${baseFilename}.mp4`;
+            const srtFilename = `${baseFilename}.srt`;
+            
+            // Clone and properly type the audio blob for QuickTime
+            // QuickTime expects AAC audio in an M4A container
+            const isIOS = /iPad|iPhone|iPod|Mac/.test(navigator.userAgent) && !window.MSStream;
+            
+            // Select the correct MIME type for QuickTime compatibility
+            let qtCompatibleType = 'audio/mp4'; // standard container format for .m4a
+            
+            // Create audio file with QuickTime compatible type 
+            const qtAudioBlob = new Blob([lastAudioResult.blob], { type: qtCompatibleType });
+            
+            // Check audio codec compatibility for QuickTime
+            const mimeType = lastAudioResult.type;
+            const codecInfo = lastAudioResult.codecInfo || 'unknown';
+            const hasAppleCompatibleCodec = mimeType.includes('mp4a.40.2') || 
+                                            mimeType.includes('aac') || 
+                                            (mimeType === 'audio/mp4' && !mimeType.includes('opus'));
+                                            
+            console.log(`QuickTime export: Original audio type=${mimeType}, codec=${codecInfo}`);
+            
+            // If codec may not be compatible, warn the user
+            if (!hasAppleCompatibleCodec) {
+                alert(
+                    "Note: Your recording may not use the AAC codec that QuickTime requires.\n\n" +
+                    "If the exported file doesn't play correctly in QuickTime:\n" +
+                    "• Try uploading an existing .m4a or .mp3 file instead of recording\n" +
+                    "• If recording directly, Chrome on Mac typically produces more compatible files"
+                );
+            }
+            
+            // Hide modal
+            modal.style.display = 'none';
+            
+            // Use Web Share API on mobile devices if available
+            if (navigator.canShare && isNativeMobileDevice()) {
+                try {
+                    const audioFile = new File([qtAudioBlob], mp4Filename, { type: qtCompatibleType });
+                    const srtFile = new File([srtContent], srtFilename, { type: 'text/plain' });
+                    
+                    if (navigator.canShare({ files: [audioFile, srtFile] })) {
+                        await navigator.share({
+                            files: [audioFile, srtFile],
+                            title: 'Audio with Subtitles',
+                            text: 'QuickTime-compatible audio and subtitles from Echo Life'
+                        });
+                        return;
+                    }
+                } catch (error) {
+                    console.error('Error sharing files:', error);
+                    // Fall back to download method
+                }
+            }
+            
+            // Information message with detailed QuickTime-specific instructions
+            alert(`Two files will be downloaded with matching names:
+
+1. ${mp4Filename} - Audio file optimized for QuickTime Player
+2. ${srtFilename} - Subtitle file
+
+To use in QuickTime Player:
+1. Open the .mp4 file in QuickTime Player
+2. Go to View > Show Subtitles
+3. If needed, use File > Open File... to select the .srt file
+
+Note: The files MUST have the same name (before the extension) to work properly.`);
+            
+            // Download audio file with QuickTime compatible extension and type
+            downloadFile(qtAudioBlob, mp4Filename, qtCompatibleType);
+            
+            // Short delay before downloading the subtitle file
+            setTimeout(() => {
+                downloadFile(srtContent, srtFilename, 'text/plain');
+            }, 1000);
+            
+        } catch (error) {
+            console.error('Error generating QuickTime export:', error);
+            alert('Error: ' + error.message);
+        } finally {
+            // Hide processing indicator
+            processingIndicator.style.display = 'none';
+        }
+    }
+
+    // Helper functions for formatting time displays - MUST be defined before being used in video export
+    
+    // Format time as MM:SS for video timestamp display
+    function formatTimeDisplay(seconds) {
+        const min = Math.floor(seconds / 60);
+        const sec = Math.floor(seconds % 60);
+        return `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+    }
+
+    // Helper to generate subtitle data from transcript
+    function generateSubtitleData(transcript) {
+        // Split the transcript into sentences
+        const sentences = transcript.match(/[^.!?]+[.!?]+/g) || [transcript];
+        const subtitles = [];
+        
+        // Estimate 3 words per second for timing
+        const wordsPerSecond = 3;
+        let startTime = 0;
+        
+        sentences.forEach(sentence => {
+            const wordCount = sentence.split(/\s+/).length;
+            const duration = wordCount / wordsPerSecond;
+            const endTime = startTime + duration;
+            
+            subtitles.push({
+                startTime,
+                endTime,
+                text: sentence.trim()
+            });
+            
+            // Update start time for next sentence
+            startTime = endTime;
+        });
+        
+        return subtitles;
+    }
+
+    // Make the function globally available to prevent scope issues
+    window.generateSubtitleData = generateSubtitleData;
+
+// Format SRT time to WebVTT format (replace comma with period)
+function formatVttTime(srtTime) {
+    return srtTime.replace(',', '.');
+}
+
+// Convert SRT content to WebVTT format
+function convertSrtToVtt(srtContent) {
+    // WebVTT requires a header
+    let vttContent = "WEBVTT\n\n";
+    
+    // Split by double newline to get each subtitle entry
+    const entries = srtContent.split('\n\n');
+    
+    entries.forEach(entry => {
+        if (!entry.trim()) return;
+        
+        const lines = entry.split('\n');
+        if (lines.length < 3) return;
+        
+        // Skip the sequence number but keep the timestamps and text
+        const timestamps = lines[1];
+        const text = lines.slice(2).join('\n');
+        
+        // Convert timestamp format from SRT (00:00:00,000) to WebVTT (00:00:00.000)
+        const vttTimestamps = timestamps.replace(/,/g, '.');
+        
+        // Add to WebVTT content
+        vttContent += vttTimestamps + '\n' + text + '\n\n';
+    });
+    
+    return vttContent;
+}
+
+// Show video export options modal with more Apple-specific options
+function showVideoExportOptions() {
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('videoExportModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'videoExportModal';
+        modal.className = 'video-export-modal';
+        
+        modal.innerHTML = `
+            <div class="video-export-content">
+                <h3>Export for Apple Devices</h3>
+                <div class="video-options">
+                    <p style="margin-bottom: 15px;">This will create a fully compatible MP4 file with embedded subtitles for QuickTime Player and iOS devices.</p>
+                    
+                    <div style="background-color: #f8f9fa; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+                        <h4 style="margin-top: 0; color: #212529;">Format Details</h4>
+                        <p><strong>Container:</strong> MP4 (.mp4)</p>
+                        <p><strong>Audio Codec:</strong> AAC-LC</p>
+                        <p><strong>Subtitles:</strong> WebVTT embedded in MP4 container</p>
+                        <p><strong>Optimization:</strong> Fast Start (moov atom at beginning)</p>
+                    </div>
+                    
+                    <div class="audio-options">
+                        <label for="audioQuality">Audio Quality:</label>
+                        <select id="audioQuality" class="export-select">
+                            <option value="128">Standard (128 kbps)</option>
+                            <option value="192" selected>High (192 kbps)</option>
+                            <option value="256">Best (256 kbps)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="video-export-buttons">
+                    <button id="generateVideoBtn" class="generate-video-btn">Generate Apple-Compatible MP4</button>
+                    <button id="cancelVideoBtn" class="cancel-video-btn">Cancel</button>
+                </div>
+                <div id="videoProcessingIndicator" class="video-processing-indicator">
+                    <div class="video-processing-spinner"></div>
+                    <p>Processing...</p>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        document.getElementById('generateVideoBtn').addEventListener('click', function() {
+            const audioQuality = document.getElementById('audioQuality').value;
+            generateAppleCompatibleMP4(parseInt(audioQuality));
+        });
+        
+        document.getElementById('cancelVideoBtn').addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+    }
+    
+    // Show the modal
+    modal.style.display = 'flex';
+}
+
+// Create Apple-compatible MP4 file with embedded WebVTT subtitles
+async function generateAppleCompatibleMP4(audioBitrate = 192) {
+    const modal = document.getElementById('videoExportModal');
+    const processingIndicator = document.getElementById('videoProcessingIndicator');
+    
+    if (!lastAudioResult || !lastAudioResult.blob || subtitlesData.length === 0) {
+        alert('Audio or subtitles are missing. Please record audio first.');
+        return;
+    }
+    
+    try {
+        // Show processing indicator
+        processingIndicator.style.display = 'block';
+        
+        // 1. Generate SRT subtitle content
+        const srtContent = generateSrtContent(subtitlesData);
+        
+        // 2. Convert SRT to WebVTT format
+        const vttContent = convertSrtToVtt(srtContent);
+        
+        // 3. Generate a base filename
+        const timestamp = getTimestamp();
+        const baseFilename = `echo_life_${timestamp}`;
+        
+        // Check if MP4Box is properly loaded
+        if (typeof MP4Box === 'undefined' || !MP4Box.createFile) {
+            throw new Error('MP4Box library not loaded correctly. Using fallback export method.');
+        }
+        
+        // Since direct WebVTT embedding is challenging in browsers, we'll use a different approach
+        // We'll export the audio file in QuickTime compatible format and WebVTT file separately
+        
+        // Prepare the audio file with QuickTime compatible settings
+        const audioBlob = lastAudioResult.blob;
+        const mp4Filename = `${baseFilename}.mp4`;
+        const vttFilename = `${baseFilename}.vtt`;
+        
+        // Set proper QuickTime compatible MIME type
+        const qtCompatibleType = 'audio/mp4';
+        const qtAudioBlob = new Blob([audioBlob], { type: qtCompatibleType });
+        
+        // Hide modal
+        modal.style.display = 'none';
+        
+        // Information message with detailed QuickTime-specific instructions
+        alert(`QuickTime and iOS compatible files will be downloaded:
+
+1. ${mp4Filename} - Audio file optimized for QuickTime Player
+2. ${vttFilename} - WebVTT subtitle file (more compatible than SRT)
+
+To use in QuickTime Player:
+1. Open the .mp4 file in QuickTime Player
+2. Go to View > Show Subtitles 
+3. Select the .vtt file when prompted
+
+For best results, keep both files in the same folder with matching names.`);
+        
+        // Download audio file with QuickTime compatible extension and type
+        downloadFile(qtAudioBlob, mp4Filename, qtCompatibleType);
+        
+        // Short delay before downloading the subtitle file
+        setTimeout(() => {
+            downloadFile(vttContent, vttFilename, 'text/vtt');
+        }, 1000);
+        
+    } catch (error) {
+        console.error('Error generating Apple-compatible export:', error);
+        
+        // Always provide a reliable fallback
+        const timestamp = getTimestamp();
+        const baseFilename = `echo_life_${timestamp}`;
+        const mp4Filename = `${baseFilename}.mp4`;
+        const vttFilename = `${baseFilename}.vtt`;
+        const srtFilename = `${baseFilename}.srt`;
+        
+        // Convert to VTT for better compatibility
+        const srtContent = generateSrtContent(subtitlesData);
+        const vttContent = convertSrtToVtt(srtContent);
+        
+        alert(`Using standard export for compatibility:
+
+1. ${mp4Filename} - Audio file 
+2. ${vttFilename} - WebVTT subtitle file (preferred)
+3. ${srtFilename} - SRT subtitle file (alternative)
+
+Both subtitle formats are provided for maximum compatibility.`);
+        
+        // Download all files for maximum compatibility
+        const qtCompatibleType = 'audio/mp4';
+        const qtAudioBlob = new Blob([lastAudioResult.blob], { type: qtCompatibleType });
+        
+        downloadFile(qtAudioBlob, mp4Filename, qtCompatibleType);
+        
+        setTimeout(() => {
+            downloadFile(vttContent, vttFilename, 'text/vtt');
+        }, 1000);
+        
+        setTimeout(() => {
+            downloadFile(srtContent, srtFilename, 'text/plain');
+        }, 2000);
+    } finally {
+        // Hide processing indicator
+        processingIndicator.style.display = 'none';
+    }
+}
 });

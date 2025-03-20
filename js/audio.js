@@ -15,25 +15,25 @@ class AudioRecorder {
         // Set recording interval for iOS (ms) - shorter for iOS to avoid buffer issues
         this.recordingInterval = this.isIOS ? 1000 : 3000;
         
-        // Best MIME types to try in order of preference
+        // Best MIME types to try in order of preference - updated for Apple compatibility
         this.mimeTypes = [
-            'audio/mp4',          // Best for iOS (especially iOS 18)
-            'audio/aac',          // Another iOS option
-            'audio/webm',         // Best for Chrome, Firefox, etc.
-            'audio/mpeg',         // Fallback
-            'audio/ogg;codecs=opus', // Another option
+            'audio/mp4;codecs=mp4a.40.2', // AAC-LC codec, best for Apple
+            'audio/aac',                  // Another Apple-compatible option
+            'audio/webm',                 // Best for Chrome, Firefox, etc.
+            'audio/mpeg',                 // Fallback
+            'audio/ogg;codecs=opus',      // Will work on most browsers except Safari
             '' // Empty string = browser's default
         ];
 
         // If on iOS, prioritize formats that work better there
         if (this.isIOS) {
             this.mimeTypes = [
-                'audio/mp4',
-                'audio/aac',
-                'audio/m4a',
-                'audio/mpeg',
-                'audio/webm',
-                ''
+                'audio/mp4;codecs=mp4a.40.2', // Explicit AAC-LC codec, Apple standard
+                'audio/mp4',                  // MP4 container, generally uses AAC on Apple
+                'audio/aac',                  // AAC audio
+                'audio/m4a',                  // Apple format
+                'audio/mpeg',                 // MP3 format, widely supported
+                ''                            // Browser default
             ];
         }
     }
@@ -76,8 +76,17 @@ class AudioRecorder {
                 options.mimeType = mimeType;
             }
             
-            // More specific options for iOS
+            // More specific options for Apple compatibility
             if (this.isIOS) {
+                // Set preferred audio settings for Apple compatibility
+                options.audioBitsPerSecond = 128000; // 128 kbps for AAC
+                options.audioSampleRate = 44100;     // 44.1 kHz - Apple standard
+                
+                // Special handling for iOS versions
+                if (this.iosVersion >= 15) {
+                    console.log("Using optimized settings for iOS 15+");
+                }
+                
                 // Lower bitrate for iOS (helps with compatibility)
                 options.audioBitsPerSecond = 48000;
                 
@@ -137,7 +146,7 @@ class AudioRecorder {
                 let audioBlob;
                 let audioType;
                 
-                // For iOS, we need special handling
+                // For iOS, we need special handling to ensure AAC codec (not Opus)
                 if (this.isIOS && this.audioChunks.length > 0) {
                     console.log(`Processing ${this.audioChunks.length} audio chunks for iOS`);
                     
@@ -152,8 +161,8 @@ class AudioRecorder {
                         // iOS 18 prefers mp4 over m4a
                         audioType = 'audio/mp4';
                     } else if (this.iosVersion >= 15) {
-                        // For newer iOS versions
-                        audioType = 'audio/m4a';
+                        // For newer iOS versions - explicit AAC codec
+                        audioType = 'audio/mp4;codecs=mp4a.40.2';
                     } else {
                         // For older iOS versions
                         audioType = 'audio/mp4';
@@ -203,7 +212,8 @@ class AudioRecorder {
                     isIOS: this.isIOS,
                     iosVersion: this.iosVersion,
                     chunks: this.audioChunks.length,
-                    chunkSizes: this.audioChunks.map(c => c.size)
+                    chunkSizes: this.audioChunks.map(c => c.size),
+                    codecInfo: this.mediaRecorder.mimeType || 'unknown' // Add codec info
                 });
             });
             

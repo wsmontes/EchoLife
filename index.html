@@ -9,6 +9,8 @@
     <link rel="stylesheet" href="css/audio-upload.css">
     <link rel="stylesheet" href="css/word-cloud.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <!-- Add MP4Box.js for MP4 container manipulation -->
+    <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -74,6 +76,27 @@
                         </button>
                         <button id="exportAudioBtn" class="export-button" disabled>
                             <i class="fas fa-file-audio"></i> Export Audio
+                        </button>
+                        <button id="exportVideoBtn" class="export-button" disabled>
+                            <i class="fas fa-film"></i> Export Video+Subs
+                        </button>
+                    </div>
+                    
+                    <!-- Subtitle Preview Player -->
+                    <div id="subtitlePreviewContainer" class="subtitle-preview-container" style="display: none;">
+                        <h4>Subtitle Preview</h4>
+                        <div class="audio-player-container">
+                            <audio id="previewAudioPlayer" controls></audio>
+                            <div id="previewSubtitleDisplay" class="subtitle-display">Subtitles will appear here during playback</div>
+                        </div>
+                        <button id="closePreviewBtn" class="close-preview-button">
+                            <i class="fas fa-times"></i> Close Preview
+                        </button>
+                    </div>
+                    
+                    <div class="preview-button-container">
+                        <button id="previewSubtitlesBtn" class="preview-button" disabled>
+                            <i class="fas fa-play-circle"></i> Preview with Subtitles
                         </button>
                     </div>
                 </div>
