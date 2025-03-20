@@ -14,8 +14,8 @@ const translations = {
         'pt-BR': 'Fale e conecte-se com a IA'
     },
     'edit_api_key': {
-        'en-US': 'Edit API Key',
-        'pt-BR': 'Editar Chave API'
+        'en-US': 'API',
+        'pt-BR': 'API'
     },
     
     // Word Cloud

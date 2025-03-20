@@ -762,3 +762,26 @@ input:checked + .slider:before {
         width: 100%;
     }
 }
+
+/* Override positioning when language controls and API button are used inside header-top */
+header > .header-top .language-controls,
+header > .header-top #editApiKeyButton {
+    position: static !important;  /* Remove absolute positioning to prevent overlaps */
+}
+
+/* Additional responsive rules for extra small screens */
+@media (max-width: 576px) {
+    .header-top {
+        flex-direction: row !important; /* Keep same line */
+        justify-content: space-between;
+        align-items: center;
+    }
+    .language-controls {
+        margin: 0 !important;
+        justify-content: flex-start;
+    }
+    #editApiKeyButton {
+        width: auto !important;
+        margin-top: 0 !important;
+    }
+}

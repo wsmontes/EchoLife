@@ -15,32 +15,34 @@
 <body>
     <div class="container">
         <header>
-            <h1>Echo Life</h1>
-            <p>Speak and connect with AI</p>
-            <!-- Language controls container -->
-            <div class="language-controls">
-                <!-- Language selector dropdown -->
-                <div class="language-selector-container">
-                    <select id="languageSelector" class="language-selector">
-                        <option value="en-US">English</option>
-                        <option value="pt-BR">Português Brasileiro</option>
-                    </select>
+            <!-- Header top with left and right sections -->
+            <div class="header-top" style="display: flex; justify-content: space-between; align-items: center;">
+                <!-- Left: language select and translation toggle -->
+                <div class="header-left" style="display: flex; align-items: center; gap: 10px;">
+                    <div class="language-selector-container">
+                        <select id="languageSelector" class="language-selector">
+                            <option value="en-US">ENG</option>
+                            <option value="pt-BR">PT-BR</option>
+                        </select>
+                    </div>
+                    <!-- Translation toggle without visible label, using tooltip via title attribute -->
+                    <div class="translation-toggle-container">
+                        <label class="toggle-switch" title="Toggle auto-translate">
+                            <input type="checkbox" id="translationToggle">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
                 </div>
-                
-                <!-- Translation toggle switch -->
-                <div class="translation-toggle-container">
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="translationToggle">
-                        <span class="slider round"></span>
-                        <span class="toggle-label" id="translationToggleLabel">Auto-translate</span>
-                    </label>
+                <!-- Right: small API key button -->
+                <div class="header-right">
+                    <button id="editApiKeyButton" style="padding:6px 12px; border:none; background: var(--accent-color); color: white; border-radius:4px; cursor:pointer;">
+                        Edit API Key
+                    </button>
                 </div>
             </div>
-            
-            <!-- New API Key editing button -->
-            <button id="editApiKeyButton" style="position:absolute; top:10px; right:10px; padding:6px 12px; border:none; background: var(--accent-color); color: white; border-radius:4px; cursor:pointer;">
-                Edit API Key
-            </button>
+            <h1>Echo Life</h1>
+            <!-- Changed subtitle to a clever one -->
+            <p>Let your voice spark tomorrow’s conversation</p>
         </header>
         
         <main>
