@@ -10,8 +10,8 @@ const translations = {
         'pt-BR': 'Echo Life'
     },
     'app_tagline': {
-        'en-US': 'Speak and connect with AI',
-        'pt-BR': 'Fale e conecte-se com a IA'
+        'en-US': 'Your voice, amplified by AI',
+        'pt-BR': 'Sua voz, amplificada pela IA'
     },
     'edit_api_key': {
         'en-US': 'Edit API Key',
