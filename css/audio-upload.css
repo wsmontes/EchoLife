@@ -351,3 +351,62 @@
     color: #7289da;
     font-weight: 600;
 }
+
+/* WhatsApp voice message upload styling */
+.whatsapp-upload-container {
+    margin-top: 20px;
+    padding: 15px;
+    border: 1px dashed #25D366;
+    border-radius: 8px;
+    background-color: rgba(37, 211, 102, 0.05);
+}
+
+.whatsapp-upload-container h3 {
+    color: #128C7E;
+    font-size: 1.1rem;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.whatsapp-instructions {
+    font-size: 0.9rem;
+    margin-bottom: 15px;
+    color: #555;
+    padding-left: 20px;
+}
+
+.whatsapp-instructions li {
+    margin-bottom: 6px;
+}
+
+.whatsapp-upload-btn {
+    background-color: #25D366;
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+
+.whatsapp-upload-btn:hover {
+    background-color: #128C7E;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .whatsapp-instructions {
+        font-size: 0.8rem;
+    }
+    
+    .whatsapp-upload-btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
