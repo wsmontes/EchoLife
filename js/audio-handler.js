@@ -3,7 +3,11 @@ class AudioHandler {
         this.chatService = chatService;
         this.audioHistory = [];
         this.currentHistoryItem = null; // Track the most recent history item
-        this.whatsAppFormats = ['.opus', '.ogg', 'audio/ogg', 'audio/opus', 'audio/ogg; codecs=opus'];
+        this.whatsAppFormats = [
+            '.opus', '.ogg', 'audio/ogg', 'audio/opus', 'audio/ogg; codecs=opus',
+            // Add iOS WhatsApp formats - they use m4a on iOS
+            'whatsapp_audio.m4a', '.m4a'
+        ];
         this.setupComplete = false;
         // Wait for DOM to be fully loaded before setting up
         if (document.readyState === 'loading') {
@@ -138,7 +142,9 @@ class AudioHandler {
                 isWhatsApp = this.whatsAppFormats.includes(fileExt) || 
                             this.whatsAppFormats.includes(file.type) ||
                             file.name.includes('PTT-') || // WhatsApp uses PTT- prefix for voice messages
-                            file.name.includes('WhatsApp Audio');
+                            file.name.includes('WhatsApp Audio') ||
+                            // iOS WhatsApp uses AUD followed by timestamp
+                            file.name.match(/AUD-\d+/i) !== null;
                 
                 if (isWhatsApp) {
                     console.log('Detected WhatsApp voice message format');

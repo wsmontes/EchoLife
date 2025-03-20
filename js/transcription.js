@@ -4,7 +4,7 @@ class WhisperTranscriptionService {
         this.supportedFormats = [
             'audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 
             'audio/m4a', 'audio/mp4', 'audio/aac', 'audio/x-m4a',
-            'audio/ogg', 'audio/opus', 'audio/ogg; codecs=opus' // Add WhatsApp formats
+            'audio/ogg', 'audio/opus', 'audio/ogg; codecs=opus' // WhatsApp formats
         ];
         this.maxRetries = 2;
         this.transcriptionError = null;
@@ -13,12 +13,21 @@ class WhisperTranscriptionService {
         this.formatExtensions = {
             '.opus': 'audio/ogg; codecs=opus',
             '.ogg': 'audio/ogg',
-            '.m4a': 'audio/mp4',
+            '.m4a': 'audio/mp4', // iOS WhatsApp uses m4a with mp4 container
             '.mp3': 'audio/mpeg',
             '.wav': 'audio/wav',
             '.aac': 'audio/aac',
             '.mp4': 'audio/mp4'
         };
+
+        // Add patterns to detect WhatsApp voice messages
+        this.whatsAppPatterns = [
+            /PTT-\d+/i,             // Android pattern (PTT-timestamp)
+            /AUD-\d+/i,             // iOS pattern (AUD-timestamp)
+            /WhatsApp Audio/i,      // General WhatsApp audio
+            /whatsapp.*\.m4a$/i,    // iOS WhatsApp m4a
+            /\.opus$/i              // Android WhatsApp opus
+        ];
     }
 
     setApiKey(key) {
@@ -36,11 +45,12 @@ class WhisperTranscriptionService {
         const iosVersion = metadata.iosVersion;
         
         // Check if this is likely a WhatsApp voice message by file extension or MIME type
-        const isWhatsApp = metadata.isWhatsApp || 
-                          (metadata.filename && 
-                           (metadata.filename.endsWith('.opus') || 
-                            metadata.filename.includes('PTT-') || 
-                            metadata.filename.includes('WhatsApp Audio')));
+        let isWhatsApp = metadata.isWhatsApp;
+        
+        // If not explicitly set, detect WhatsApp format
+        if (!isWhatsApp && metadata.filename) {
+            isWhatsApp = this.whatsAppPatterns.some(pattern => pattern.test(metadata.filename));
+        }
         
         console.log(`Validating audio: ${audioBlob.size} bytes, type: ${audioBlob.type}, iOS: ${isIOSDevice}, WhatsApp: ${isWhatsApp}`);
         
@@ -58,8 +68,15 @@ class WhisperTranscriptionService {
             
             // Special handling for WhatsApp voice messages
             if (isWhatsApp) {
-                detectedType = 'audio/ogg; codecs=opus';
-                console.log('Using WhatsApp voice message format: audio/ogg; codecs=opus');
+                // iOS WhatsApp uses m4a format
+                if (isIOSDevice || (metadata.filename && metadata.filename.toLowerCase().endsWith('.m4a'))) {
+                    detectedType = 'audio/mp4';
+                    console.log('Using iOS WhatsApp voice message format: audio/mp4');
+                } else {
+                    // Android WhatsApp uses opus
+                    detectedType = 'audio/ogg; codecs=opus';
+                    console.log('Using Android WhatsApp voice message format: audio/ogg; codecs=opus');
+                }
             }
         }
         
@@ -142,10 +159,11 @@ class WhisperTranscriptionService {
                 filename: audioData.name,
                 type: audioData.type,
                 isWhatsApp: audioData.name.endsWith('.opus') || 
-                          audioData.name.includes('PTT-') || 
-                          audioData.name.includes('WhatsApp Audio') ||
-                          audioData.type === 'audio/ogg' ||
-                          audioData.type.includes('opus')
+                           audioData.name.match(/PTT-\d+/i) !== null ||
+                           audioData.name.match(/AUD-\d+/i) !== null || // iOS WhatsApp
+                           audioData.name.includes('WhatsApp Audio') ||
+                           audioData.type === 'audio/ogg' ||
+                           audioData.type.includes('opus')
             };
         } else {
             // Original format (just the blob)
@@ -164,10 +182,16 @@ class WhisperTranscriptionService {
             
             // Better detection for WhatsApp audio
             if (metadata.isWhatsApp) {
-                if (metadata.filename && metadata.filename.endsWith('.opus')) {
+                if (metadata.filename && metadata.filename.endsWith('.m4a')) {
+                    // iOS WhatsApp uses m4a
+                    fileExtension = 'm4a';
+                    type = 'audio/mp4';
+                } else if (metadata.filename && metadata.filename.endsWith('.opus')) {
+                    // Android WhatsApp uses opus
                     fileExtension = 'opus';
                     type = 'audio/ogg; codecs=opus';
                 } else {
+                    // Default to ogg for other WhatsApp formats
                     fileExtension = 'ogg';
                     type = 'audio/ogg';
                 }
@@ -203,7 +227,10 @@ class WhisperTranscriptionService {
             let filename;
             
             if (metadata.isWhatsApp) {
-                filename = `whatsapp_${uniqueId}.${fileExtension}`;
+                const isIOSWhatsApp = metadata.filename && metadata.filename.endsWith('.m4a');
+                filename = isIOSWhatsApp 
+                    ? `whatsapp_ios_${uniqueId}.${fileExtension}`
+                    : `whatsapp_${uniqueId}.${fileExtension}`;
             } else if (metadata.isIOS) {
                 filename = `ios${metadata.iosVersion || ''}_recording_${uniqueId}.${fileExtension}`;
             } else if (metadata.filename) {
