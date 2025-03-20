@@ -1,424 +1,479 @@
+/**
+ * TagExtractor class for extracting key concepts and tags from text
+ * using OpenAI's API
+ */
 class TagExtractor {
     constructor() {
         this.apiKey = null;
-        this.contextHistory = [];
-        this.tagConfidence = new Map(); // maps tag -> {text, confidence, count, lastUpdated, group}
-        // New decay threshold in ms for realtime updates
-        this.realtimeDecayThreshold = 3000;
+        this.context = [];
+        this.systemPrompt = `
+        Extract the 4-8 most important keywords or phrases from the text. 
+        Focus on substantive topics, not conversational filler.
+        Respond with JSON array format only: 
+        [{"text": "keyword1", "confidence": "high/medium/low"}, ...] 
+        Do not include confidence labels in the text field.
+        Do not include explanations or additional text.`;
+        
+        // Language-specific settings
+        this.language = localStorage.getItem('echolife_language') || 'en-US';
+        
+        // Listen for language changes
+        window.addEventListener('languageChanged', (e) => {
+            this.language = e.detail.language;
+            console.log(`Tag extractor language set to: ${this.language}`);
+        });
     }
-
+    
     setApiKey(key) {
         this.apiKey = key;
     }
-
+    
     resetContext() {
-        this.contextHistory = [];
-        this.tagConfidence.clear();
-    }
-
-    getContextPrompt() {
-        if (this.contextHistory.length === 0) return "";
-        return "Previous context: " + this.contextHistory.slice(-3).join(" ");
-    }
-
-    // New helper to determine a tag group based on simple keyword matching.
-    determineGroup(text) {
-        const lower = text.toLowerCase();
-        if (lower.includes("health") || lower.includes("fitness") || lower.includes("wellness")) {
-            return "health";
-        } else if (lower.includes("money") || lower.includes("finance") || lower.includes("invest")) {
-            return "finance";
-        } else if (lower.includes("tech") || lower.includes("ai") || lower.includes("machine") || lower.includes("software")) {
-            return "technology";
-        }
-        return "other";
+        this.context = [];
     }
     
-    async extractTags(text, maxTags = 8, useContext = true, language = null) {
+    /**
+     * Extract tags from text
+     * @param {string} text - The text to extract tags from
+     * @param {number} maxTags - Maximum number of tags to extract
+     * @param {boolean} trackContext - Whether to track context over time
+     * @returns {Promise<Array>} - Array of tags
+     */
+    async extractTags(text, maxTags = 5, trackContext = true) {
         if (!this.apiKey) {
-            throw new Error('API key not set for tag extraction');
-        }
-        if (!text || text.trim().length < 10) {
-            return [{text: 'Too short', confidence: 'low', count: 1, group: "other"}];
+            throw new Error('API key not set');
         }
         
-        // Get the current app language and translation settings
-        if (!language) {
-            // Get language from translation controller if available
-            if (window.translationController) {
-                const settings = window.translationController.getSettings();
-                // Use the actual language of the text, which depends on translation setting
-                language = settings.translateEnabled ? settings.targetLanguage : settings.language;
-            } else {
-                language = localStorage.getItem('echolife_language') || 'en-US';
-            }
+        if (!text || typeof text !== 'string' || text.trim().length === 0) {
+            return [];
         }
         
         try {
-            const contextPrompt = useContext ? this.getContextPrompt() : "";
-            const isPortuguese = language === 'pt-BR';
+            // Determine the language to use for the prompt
+            const promptLanguage = this.language === 'pt-BR' ? 'Portuguese' : 'English';
             
+            // Create a more focused prompt for the specific language
+            const prompt = `
+            Extract ${maxTags} most important keywords or phrases from this ${promptLanguage} text. 
+            Focus on substantive topics, not conversational filler.
+            Return ONLY JSON array: [{"text": "keyword", "confidence": "high/medium/low"}]
+            No explanations or additional text.`;
+            
+            // Call OpenAI API
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.apiKey}`
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
                     model: 'gpt-3.5-turbo',
+                    temperature: 0.3,
                     messages: [
-                        {
-                            role: 'system',
-                            content: `${isPortuguese ? 
-                                `Extraia ${maxTags} tags, contextos ou conceitos chave do seguinte texto.
-                                ${contextPrompt}
-                                Para cada tag, avalie seu nível de confiança (alto, médio ou baixo) com base em quão claramente ela se relaciona com o texto.
-                                Retorne um array JSON de objetos com propriedades "text" e "confidence".` :
-                                
-                                `Extract ${maxTags} key tags, contexts, or concepts from the following text. 
-                                ${contextPrompt}
-                                For each tag, assess its confidence level (high, medium, or low) based on how clearly it relates to the text.
-                                Return a JSON array of objects with "text" and "confidence" properties.`}`
-                        },
-                        {
-                            role: 'user',
-                            content: text
-                        }
-                    ],
-                    max_tokens: 200,
-                    temperature: 0.3
+                        { role: 'system', content: prompt },
+                        { role: 'user', content: text }
+                    ]
                 })
             });
+            
             if (!response.ok) {
                 const error = await response.json();
-                throw new Error(`Tag extraction error: ${error.error?.message || response.statusText}`);
-            }
-            const data = await response.json();
-            const tagResponse = data.choices[0].message.content;
-            let tags = [];
-            
-            // Rest of parsing logic remains the same
-            try {
-                if (tagResponse.includes('[') && tagResponse.includes(']')) {
-                    const jsonString = tagResponse.substring(
-                        tagResponse.indexOf('['),
-                        tagResponse.lastIndexOf(']') + 1
-                    );
-                    tags = JSON.parse(jsonString);
-                } else {
-                    tags = tagResponse.split(',')
-                        .map(tag => ({ text: tag.trim(), confidence: 'medium' }))
-                        .filter(tag => tag.text)
-                        .slice(0, maxTags);
-                }
-            } catch (e) {
-                console.error('Error parsing tags:', e);
-                tags = tagResponse.split(/[,\n]/)
-                    .map(tag => ({ text: tag.trim(), confidence: 'medium' }))
-                    .filter(tag => tag.text && !tag.text.includes('{') && !tag.text.includes('}'))
-                    .slice(0, maxTags);
+                throw new Error(error.error?.message || `API error: ${response.status}`);
             }
             
-            if (useContext && tags.length > 0) {
-                const contextUpdate = tags.filter(tag => tag.confidence === 'high')
-                    .map(tag => tag.text)
-                    .join(", ");
-                if (contextUpdate) {
-                    this.contextHistory.push(contextUpdate);
-                    if (this.contextHistory.length > 10) { this.contextHistory.shift(); }
-                }
-                // Merge new tags into our tagConfidence store
-                tags = this.trackTagConfidence(tags);
+            const result = await response.json();
+            const content = result.choices[0].message.content;
+            
+            // Extract and parse the JSON array
+            const tags = this.parseTagsFromResponse(content);
+            
+            // Filter out any improperly formatted tags
+            const cleanedTags = this.cleanTags(tags);
+            
+            // Track context if requested
+            if (trackContext) {
+                this.updateContext(cleanedTags);
             }
-            // Log each tag
-            tags.forEach(tag => console.log(tag));
-            return tags;
+            
+            return cleanedTags;
         } catch (error) {
             console.error('Error extracting tags:', error);
-            const errorMessage = language === 'pt-BR' ? 'Erro ao extrair tags' : 'Error extracting tags';
-            return [{text: errorMessage, confidence: 'low', count: 1, group: "other"}];
+            return [];
         }
     }
     
-    // Modified merge function for realtime smoothing and decay
-    trackTagConfidence(newTags) {
-        const now = Date.now();
-        // Update or add new tags
-        newTags.forEach(tag => {
-            const tagText = tag.text.toLowerCase();
-            if (this.tagConfidence.has(tagText)) {
-                let info = this.tagConfidence.get(tagText);
-                info.count = info.count + 1;  // increment smoothly
-                info.lastUpdated = now;
-                if (tag.confidence === 'high') info.confidence = 'high';
-                info.group = this.determineGroup(tag.text);
-                this.tagConfidence.set(tagText, info);
-            } else {
-                this.tagConfidence.set(tagText, {
-                    text: tag.text,
-                    confidence: tag.confidence,
-                    count: 1,
-                    lastUpdated: now,
-                    group: this.determineGroup(tag.text)
-                });
-            }
-        });
-        // Decay tags that were not refreshed recently
-        for (let [key, info] of this.tagConfidence) {
-            const delta = now - info.lastUpdated;
-            if (delta > this.realtimeDecayThreshold) {
-                // reduce count gradually (e.g. subtract 1 for each threshold period elapsed)
-                const decayUnits = Math.floor(delta / this.realtimeDecayThreshold);
-                info.count = info.count - decayUnits;
-                if (info.count <= 0) {
-                    this.tagConfidence.delete(key);
-                    continue;
-                } else {
-                    // update lastUpdated to a later time so counting is smooth
-                    info.lastUpdated = now - (delta % this.realtimeDecayThreshold);
-                    this.tagConfidence.set(key, info);
+    /**
+     * Clean tags and remove structural elements
+     * @param {Array} tags - Array of tag objects
+     * @returns {Array} - Cleaned tag objects
+     */
+    cleanTags(tags) {
+        return tags
+            .filter(tag => tag && tag.text)
+            .map(tag => {
+                // Create a clean copy of the tag
+                const cleanTag = { ...tag };
+                
+                // Clean up the text field - remove confidence labels and formatting
+                let cleanText = tag.text
+                    .replace(/\s*-\s*Confidence:\s*(High|Medium|Low)\s*/gi, '')
+                    .replace(/\d+\.\s+/g, '') // Remove numbered list markers
+                    .replace(/^['"\s(]|['"\s)]+$/g, '') // Trim quotes/parens/spaces from start/end
+                    .trim();
+                
+                // Limit to 30 characters for display
+                if (cleanText.length > 30) {
+                    cleanText = cleanText.substring(0, 27) + '...';
+                }
+                
+                cleanTag.text = cleanText;
+                
+                // Ensure we have a valid confidence value
+                if (!['high', 'medium', 'low'].includes(cleanTag.confidence?.toLowerCase())) {
+                    cleanTag.confidence = 'medium';
+                }
+                
+                return cleanTag;
+            })
+            .filter(tag => tag.text.length > 0 && tag.text.length <= 30);
+    }
+    
+    /**
+     * Parse tags from OpenAI response
+     * @param {string} response - The raw response from OpenAI
+     * @returns {Array} - Array of tag objects
+     */
+    parseTagsFromResponse(response) {
+        try {
+            // First, try to find and extract JSON array using regex
+            const jsonMatch = response.match(/\[[\s\S]*\]/);
+            if (jsonMatch) {
+                try {
+                    return JSON.parse(jsonMatch[0]);
+                } catch (e) {
+                    console.warn('JSON extraction failed:', e);
                 }
             }
+            
+            // If regex extraction failed, try to parse the entire response as JSON
+            try {
+                return JSON.parse(response);
+            } catch (e) {
+                console.warn('Complete response JSON parsing failed:', e);
+            }
+            
+            // Last resort: manual extraction for malformed responses
+            // This tries to handle cases where the model returns improperly formatted JSON
+            const tagEntries = response
+                .split(/[\n,]+/)
+                .filter(line => line.includes(':') && 
+                              (line.includes('"text"') || 
+                               line.includes('"confidence"')));
+            
+            if (tagEntries.length > 0) {
+                console.log('Falling back to manual JSON extraction');
+                
+                // Extract tag objects from lines
+                const manualTags = [];
+                let currentTag = {};
+                
+                for (const line of tagEntries) {
+                    if (line.includes('"text"')) {
+                        // If we already have a text field and this is a new one, save the current tag
+                        if (currentTag.text) {
+                            manualTags.push({...currentTag});
+                            currentTag = {};
+                        }
+                        
+                        const textMatch = line.match(/"text"\s*:\s*"([^"]*)"/);
+                        if (textMatch) {
+                            currentTag.text = textMatch[1];
+                        }
+                    }
+                    
+                    if (line.includes('"confidence"')) {
+                        const confMatch = line.match(/"confidence"\s*:\s*"([^"]*)"/);
+                        if (confMatch) {
+                            currentTag.confidence = confMatch[1];
+                            
+                            // If we have both text and confidence, save this tag
+                            if (currentTag.text) {
+                                manualTags.push({...currentTag});
+                                currentTag = {};
+                            }
+                        }
+                    }
+                }
+                
+                // Add the last tag if it's not empty
+                if (currentTag.text) {
+                    manualTags.push(currentTag);
+                }
+                
+                return manualTags;
+            }
+            
+            // Everything failed, return empty array
+            console.error('Tag extraction completely failed for response:', response);
+            return [];
+            
+        } catch (error) {
+            console.error('Error parsing tags from response:', error);
+            return [];
         }
-        return Array.from(this.tagConfidence.values());
     }
-
-    async extractTagsRealtime(partialText, maxTags = 5, language = null) {
-        if (!this.apiKey || !partialText || partialText.trim().length < 5) {
-            const placeholderText = language === 'pt-BR' ? 'Ouvindo...' : 'Listening...';
-            return [{text: placeholderText, confidence: 'low', count: 1, group: "other"}];
+    
+    /**
+     * Extract tags for real-time updates during recording
+     * @param {string} text - Text to extract tags from
+     * @param {number} maxTags - Maximum number of tags to extract
+     * @param {string} language - Language code
+     * @returns {Promise<Array>} - Array of tag objects
+     */
+    async extractTagsRealtime(text, maxTags = 5, language = null) {
+        if (!this.apiKey) {
+            throw new Error('API key not set');
         }
         
-        // Get the current app language and translation settings
-        if (!language) {
-            // Get language from translation controller if available
-            if (window.translationController) {
-                const settings = window.translationController.getSettings();
-                // Use the actual language of the text, which depends on translation setting
-                language = settings.translateEnabled ? settings.targetLanguage : settings.language;
-            } else {
-                language = localStorage.getItem('echolife_language') || 'en-US';
-            }
+        console.log(`[TAG-EXTRACTOR] Starting realtime extraction: ${text.length} chars`);
+        console.time('tag-extraction');
+        
+        // Use specified language or fall back to the default
+        const lang = language || this.language;
+        
+        // For very short text, return placeholder
+        if (text.length < 25) {
+            console.log(`[TAG-EXTRACTOR] Text too short (${text.length} chars), using placeholder`);
+            console.timeEnd('tag-extraction');
+            return this.getPlaceholderTags(lang);
         }
         
         try {
-            // Use context history if available for better continuity
-            const contextPrompt = this.contextHistory.length > 0 ? 
-                "Previous context: " + this.contextHistory.slice(-2).join(" ") : "";
+            // Check if we can use fallback for quick responses
+            const shouldUseFallback = Math.random() < 0.25; // 25% chance to use fallback for faster updates
             
-            const isPortuguese = language === 'pt-BR';
+            if (shouldUseFallback && text.length < 500) {
+                console.log('[TAG-EXTRACTOR] Using fallback extraction for quick response');
+                const fallbackTags = await this.fallbackKeywordExtraction(text, maxTags);
+                console.timeEnd('tag-extraction');
+                return fallbackTags;
+            }
             
+            // Improved prompt designed to be more efficient and handle a variety of content
+            const prompt = lang === 'pt-BR' 
+                ? `Analise este texto e extraia ${maxTags} termos chave. Responda APENAS com JSON: [{"text": "termo", "confidence": "high/medium/low"}]`
+                : `Extract ${maxTags} key terms from this text. ONLY respond with JSON: [{"text": "term", "confidence": "high/medium/low"}]`;
+            
+            console.log(`[TAG-EXTRACTOR] Sending API request with ${text.length} chars of text, language: ${lang}`);
+            
+            // For realtime updates, use a faster model with more constraints
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.apiKey}`
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    model: 'gpt-3.5-turbo', 
-                    messages: [
-                        {
-                            role: 'system',
-                            content: `${isPortuguese ? 
-                                `Extraia até ${maxTags} tópicos chave deste discurso parcial.
-                                ${contextPrompt}
-                                Para cada tópico, avalie seu nível de confiança com base na clareza e contexto.
-                                Retorne um array JSON com objetos contendo:
-                                - "text": o termo do tópico
-                                - "confidence": "high", "medium", ou "low"
-                                - "uncertain": true se você não tiver certeza sobre o significado/contexto
-
-                                Exemplo: [{"text": "aprendizado de máquina", "confidence": "high"}, 
-                                          {"text": "redes neurais?", "confidence": "low", "uncertain": true}]
-
-                                Adicione um ponto de interrogação a termos incertos. Seja mais conservador com os níveis de confiança durante o discurso parcial.` :
-                                
-                                `Extract up to ${maxTags} key topics from this partial speech.
-                                ${contextPrompt}
-                                For each topic, assess your confidence level based on clarity and context.
-                                Return a JSON array with objects having:
-                                - "text": the topic term
-                                - "confidence": "high", "medium", or "low"
-                                - "uncertain": true if you're unsure about the meaning/context
-
-                                Example: [{"text": "machine learning", "confidence": "high"}, 
-                                          {"text": "neural networks?", "confidence": "low", "uncertain": true}]
-
-                                Append a question mark to uncertain terms. Be more conservative with confidence levels during partial speech.`}`
-                        },
-                        {
-                            role: 'user',
-                            content: partialText
-                        }
-                    ],
+                    model: 'gpt-3.5-turbo',
+                    temperature: 0.2,
                     max_tokens: 150,
-                    temperature: 0.3
+                    presence_penalty: -0.1, // Discourage verbosity
+                    messages: [
+                        { role: 'system', content: prompt },
+                        { role: 'user', content: text.substring(0, 1000) } // Limit text length for faster response
+                    ]
                 })
             });
-
+            
             if (!response.ok) {
-                throw new Error('Real-time tag extraction failed');
-            }
-
-            const data = await response.json();
-            let tagResponse = data.choices[0].message.content;
-            let tags = [];
-
-            try {
-                if (tagResponse.includes('[') && tagResponse.includes(']')) {
-                    const jsonString = tagResponse.substring(
-                        tagResponse.indexOf('['),
-                        tagResponse.lastIndexOf(']') + 1
-                    );
-                    
-                    const rawTags = JSON.parse(jsonString);
-                    
-                    // Process the tags to handle uncertainty markers
-                    tags = rawTags.map(tag => {
-                        // Set the base text - if it already has a question mark from the API, use as is
-                        let text = tag.text;
-                        
-                        // Add uncertainty indicator if flagged but not already included
-                        if (tag.uncertain === true && !text.endsWith('?')) {
-                            text = text + '?';
-                        }
-                        
-                        // Normalize confidence
-                        let confidence = tag.confidence ? tag.confidence.toLowerCase() : 'medium';
-                        
-                        // If the term is uncertain, never rate it higher than medium
-                        if (tag.uncertain === true && confidence === 'high') {
-                            confidence = 'medium';
-                        }
-                        
-                        return {
-                            text: text,
-                            confidence: confidence,
-                            count: 1,
-                            group: this.determineGroup(text),
-                            uncertain: tag.uncertain === true
-                        };
-                    });
-                } else {
-                    tags = [{text: 'Processing...', confidence: 'low', count: 1, group: "other"}];
-                }
-            } catch (e) {
-                console.error('Error parsing real-time tags:', e);
-                const processingText = language === 'pt-BR' ? 'Processando...' : 'Processing...';
-                tags = [{text: processingText, confidence: 'low', count: 1, group: "other"}];
+                const error = await response.json();
+                console.error(`[TAG-EXTRACTOR] API error: ${error.error?.message || response.status}`);
+                throw new Error(error.error?.message || `API error: ${response.status}`);
             }
             
-            // Merge into our overall tagConfidence store with uncertainty handling
-            tags = this.trackTagConfidenceWithUncertainty(tags);
-            // Log each tag
-            tags.forEach(tag => console.log(tag));
-            return tags;
+            const result = await response.json();
+            const content = result.choices[0].message.content;
+            
+            console.log(`[TAG-EXTRACTOR] API response received:`, content);
+            
+            // Extract and parse tags
+            const tags = this.parseTagsFromResponse(content);
+            console.log(`[TAG-EXTRACTOR] Parsed ${tags.length} tags from response`);
+            
+            // Clean the tags
+            const cleanedTags = this.cleanTags(tags);
+            console.log(`[TAG-EXTRACTOR] Cleaned tags (${cleanedTags.length}):`, cleanedTags);
+            
+            // If we got any valid tags, update the context and return them
+            if (cleanedTags.length > 0) {
+                this.updateContext(cleanedTags);
+                console.timeEnd('tag-extraction');
+                return cleanedTags;
+            }
+            
+            console.log('[TAG-EXTRACTOR] No valid tags extracted, falling back to keyword extraction');
+            // Fallback to basic keyword extraction if AI extraction failed
+            const fallbackTags = await this.fallbackKeywordExtraction(text, maxTags);
+            console.log(`[TAG-EXTRACTOR] Fallback extraction produced ${fallbackTags.length} tags:`, fallbackTags);
+            console.timeEnd('tag-extraction');
+            return fallbackTags;
+            
         } catch (error) {
-            console.error('Real-time tag extraction error:', error);
-            const listeningText = language === 'pt-BR' ? 'Ouvindo...' : 'Listening...';
-            return [{text: listeningText, confidence: 'low', count: 1, group: "other"}];
+            console.error('[TAG-EXTRACTOR] Error in real-time tag extraction:', error);
+            
+            // Fallback to basic keyword extraction in case of API errors
+            console.log('[TAG-EXTRACTOR] Using fallback keyword extraction due to error');
+            const fallbackTags = await this.fallbackKeywordExtraction(text, maxTags);
+            console.timeEnd('tag-extraction');
+            return fallbackTags;
         }
     }
     
-    // Enhanced version for tracking confidence with uncertainty handling
-    trackTagConfidenceWithUncertainty(newTags) {
-        const now = Date.now();
+    /**
+     * Fallback method to extract keywords without API
+     * @param {string} text - Text to extract keywords from
+     * @param {number} maxWords - Maximum number of keywords
+     * @returns {Array} - Array of tag objects
+     */
+    fallbackKeywordExtraction(text, maxWords = 5) {
+        try {
+            // Define stop words for English and Portuguese
+            const stopWords = {
+                'en-US': ['i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 
+                         'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 
+                         'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 
+                         'what', 'which', 'who', 'whom', 'this', 'that', 'these', 'those', 'am', 'is', 'are', 
+                         'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 
+                         'did', 'doing', 'a', 'an', 'the', 'and', 'but', 'if', 'or', 'because', 'as', 'until', 
+                         'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 
+                         'through', 'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down', 
+                         'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 
+                         'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 
+                         'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 
+                         'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'd', 
+                         'll', 'm', 'o', 're', 've', 'y', 'ain', 'aren', 'couldn', 'didn', 'doesn', 'hadn', 
+                         'hasn', 'haven', 'isn', 'ma', 'mightn', 'mustn', 'needn', 'shan', 'shouldn', 'wasn', 
+                         'weren', 'won', 'wouldn', 'know', 'think', 'like', 'said', 'actually', 'really',
+                         'pretty', 'kind', 'okay', 'yeah', 'yes', 'no', 'hey', 'hi', 'hello', 'ok', 'sure'],
+                         
+                'pt-BR': ['a', 'à', 'ao', 'aos', 'aquela', 'aquelas', 'aquele', 'aqueles', 'aquilo', 'as', 'às', 
+                         'até', 'com', 'como', 'da', 'das', 'de', 'dela', 'delas', 'dele', 'deles', 'depois', 
+                         'do', 'dos', 'e', 'é', 'ela', 'elas', 'ele', 'eles', 'em', 'entre', 'era', 'eram', 
+                         'éramos', 'essa', 'essas', 'esse', 'esses', 'esta', 'está', 'estamos', 'estão', 
+                         'estas', 'estava', 'estavam', 'estávamos', 'este', 'esteja', 'estejam', 'estejamos', 
+                         'estes', 'esteve', 'estive', 'estivemos', 'estiver', 'estivera', 'estiveram', 
+                         'estiverem', 'estivermos', 'estou', 'eu', 'foi', 'fomos', 'for', 'fora', 'foram', 
+                         'forem', 'formos', 'fosse', 'fossem', 'fôssemos', 'fui', 'há', 'haja', 'hajam', 
+                         'hajamos', 'hão', 'havemos', 'havia', 'hei', 'houve', 'houvemos', 'houver', 'houvera', 
+                         'houveram', 'houverei', 'houverem', 'houveremos', 'houveria', 'houveriam', 
+                         'houvermos', 'houverá', 'houverão', 'houveríamos', 'houverão', 'isso', 'isto', 'já', 
+                         'lhe', 'lhes', 'mais', 'mas', 'me', 'mesmo', 'meu', 'meus', 'minha', 'minhas', 'muito', 
+                         'na', 'nas', 'nem', 'no', 'nos', 'nós', 'nossa', 'nossas', 'nosso', 'nossos', 'num', 
+                         'numa', 'o', 'os', 'ou', 'para', 'pela', 'pelas', 'pelo', 'pelos', 'por', 'qual', 
+                         'quando', 'que', 'quem', 'são', 'se', 'seja', 'sejam', 'sejamos', 'sem', 'será', 
+                         'serão', 'seria', 'seriam', 'seríamos', 'seu', 'seus', 'só', 'somos', 'sou', 'sua', 
+                         'suas', 'também', 'te', 'tem', 'tém', 'temos', 'tenha', 'tenham', 'tenhamos', 'tenho', 
+                         'terá', 'terão', 'terei', 'teremos', 'teria', 'teriam', 'teríamos', 'teu', 'teus', 
+                         'teve', 'tinha', 'tinham', 'tínhamos', 'tive', 'tivemos', 'tiver', 'tivera', 'tiveram', 
+                         'tiverem', 'tivermos', 'tu', 'tua', 'tuas', 'um', 'uma', 'você', 'vocês', 'vos', 'sim', 
+                         'então', 'vamos', 'ok', 'né', 'tipo']
+            };
+            
+            // Select stop words based on language
+            const currentStopWords = stopWords[this.language] || stopWords['en-US'];
+            
+            // Tokenize
+            const words = text.toLowerCase()
+                             .replace(/[^\w\s]/g, ' ')  // Replace punctuation with spaces
+                             .split(/\s+/)              // Split on whitespace
+                             .filter(word => word.length > 2 && !currentStopWords.includes(word));
+            
+            // Count word frequencies
+            const wordCounts = {};
+            words.forEach(word => {
+                wordCounts[word] = (wordCounts[word] || 0) + 1;
+            });
+            
+            // Convert to array of {word, count} objects and sort by count
+            const sortedWords = Object.entries(wordCounts)
+                .map(([word, count]) => ({ word, count }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, maxWords);
+            
+            // Convert to tag objects
+            return sortedWords.map(({ word, count }) => ({
+                text: word,
+                confidence: count > 3 ? 'high' : (count > 1 ? 'medium' : 'low'),
+                count: count
+            }));
+        } catch (error) {
+            console.error('Error in fallback keyword extraction:', error);
+            return this.getPlaceholderTags(this.language);
+        }
+    }
+    
+    // Helper to return placeholder tags based on language
+    getPlaceholderTags(language) {
+        if (language === 'pt-BR') {
+            return [
+                { text: 'Analisando...', confidence: 'medium', count: 1 }
+            ];
+        } else {
+            return [
+                { text: 'Analyzing...', confidence: 'medium', count: 1 }
+            ];
+        }
+    }
+    
+    /**
+     * Update stored context with new tags
+     * @param {Array} newTags - Array of new tag objects
+     */
+    updateContext(newTags) {
+        if (!newTags || newTags.length === 0) return;
         
-        // Update or add new tags
-        newTags.forEach(tag => {
-            const tagText = tag.text.toLowerCase();
-            const isUncertain = tag.uncertain === true || tagText.endsWith('?');
+        // Keep context limited to most recent tags
+        this.context = this.context.slice(0, 20);
+        
+        // Update existing tags or add new ones
+        for (const newTag of newTags) {
+            const existingTagIndex = this.context.findIndex(
+                t => t.text.toLowerCase() === newTag.text.toLowerCase()
+            );
             
-            // Base text without question mark for uncertainty
-            const baseText = isUncertain ? tagText.replace(/\?$/, '') : tagText;
-            
-            if (this.tagConfidence.has(baseText)) {
-                let info = this.tagConfidence.get(baseText);
+            if (existingTagIndex >= 0) {
+                // Update existing tag
+                const existingTag = this.context[existingTagIndex];
                 
-                // Update count based on confidence and uncertainty
-                if (tag.confidence === 'high' && !isUncertain) {
-                    info.count = info.count + 1.5;  // Boost high confidence terms
-                } else if (tag.confidence === 'low' || isUncertain) {
-                    info.count = info.count + 0.5;  // Reduce impact of uncertain terms
-                } else {
-                    info.count = info.count + 1;  // Medium confidence
+                // Mark as changing context if confidence has changed
+                if (existingTag.confidence !== newTag.confidence) {
+                    newTag.status = 'changing';
                 }
                 
-                // Refresh the timestamp
-                info.lastUpdated = now;
-                
-                // Update confidence level if new one is higher
-                if (tag.confidence === 'high' && info.confidence !== 'high') {
-                    info.confidence = 'high';
-                }
-                
-                // Update uncertain state - if we were uncertain before but now we're certain, remove uncertainty
-                if (info.uncertain && !isUncertain && tag.confidence !== 'low') {
-                    info.uncertain = false;
-                    info.text = baseText; // Remove question mark
-                } 
-                // If we're uncertain now, mark it
-                else if (isUncertain) {
-                    info.uncertain = true;
-                    info.text = baseText + '?'; // Add question mark
-                }
-                
-                // Update group if needed
-                info.group = this.determineGroup(baseText);
-                
-                this.tagConfidence.set(baseText, info);
+                // Update the existing tag
+                this.context[existingTagIndex] = {
+                    ...newTag,
+                    count: (existingTag.count || 1) + 1,
+                    lastUpdated: Date.now()
+                };
             } else {
-                // For new tags, check if there's a version without question mark
-                const textWithoutQuestion = tagText.replace(/\?$/, '');
-                
-                if (isUncertain && this.tagConfidence.has(textWithoutQuestion)) {
-                    // If we already have the base term, just update it to be uncertain
-                    let info = this.tagConfidence.get(textWithoutQuestion);
-                    info.uncertain = true;
-                    info.text = textWithoutQuestion + '?';
-                    info.lastUpdated = now;
-                    this.tagConfidence.set(textWithoutQuestion, info);
-                } else {
-                    // Completely new tag
-                    this.tagConfidence.set(baseText, {
-                        text: isUncertain ? baseText + '?' : baseText,
-                        confidence: tag.confidence,
-                        count: tag.confidence === 'high' ? 1.5 : (tag.confidence === 'low' ? 0.5 : 1),
-                        lastUpdated: now,
-                        group: this.determineGroup(baseText),
-                        uncertain: isUncertain
-                    });
-                }
-            }
-        });
-        
-        // Decay tags that were not refreshed recently
-        for (let [key, info] of this.tagConfidence) {
-            const delta = now - info.lastUpdated;
-            if (delta > this.realtimeDecayThreshold) {
-                // reduce count gradually (e.g. subtract 1 for each threshold period elapsed)
-                const decayUnits = Math.floor(delta / this.realtimeDecayThreshold);
-                info.count = info.count - decayUnits;
-                if (info.count <= 0) {
-                    this.tagConfidence.delete(key);
-                    continue;
-                } else {
-                    // update lastUpdated to a later time so counting is smooth
-                    info.lastUpdated = now - (delta % this.realtimeDecayThreshold);
-                    this.tagConfidence.set(key, info);
-                }
+                // Add new tag
+                this.context.push({
+                    ...newTag,
+                    count: 1,
+                    lastUpdated: Date.now(),
+                    status: 'new'
+                });
             }
         }
         
-        // Add a special visual indicator class for uncertain terms
-        return Array.from(this.tagConfidence.values()).map(tag => {
-            if (tag.uncertain) {
-                tag.status = 'uncertain';
-            }
-            return tag;
-        });
+        // Sort by count (descending)
+        this.context.sort((a, b) => (b.count || 0) - (a.count || 0));
     }
 }
 
-// Create a global instance of the tag extractor
+// Create a global instance
 const tagExtractor = new TagExtractor();
+
+// Make it globally available
+window.tagExtractor = tagExtractor;

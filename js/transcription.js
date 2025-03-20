@@ -1,528 +1,546 @@
+/**
+ * Whisper API Transcription Service
+ * Provides audio transcription using OpenAI's Whisper API
+ */
 class WhisperTranscriptionService {
     constructor() {
         this.apiKey = null;
-        this.supportedFormats = [
-            'audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 
-            'audio/m4a', 'audio/mp4', 'audio/aac', 'audio/x-m4a',
-            'audio/ogg', 'audio/opus', 'audio/ogg; codecs=opus' // WhatsApp formats
-        ];
-        this.maxRetries = 2;
-        this.transcriptionError = null;
+        this.subtitleData = [];
+        this.lastError = null;
         
-        // Add file extensions for blob type detection
-        this.formatExtensions = {
-            '.opus': 'audio/ogg; codecs=opus',
-            '.ogg': 'audio/ogg',
-            '.m4a': 'audio/mp4', // iOS WhatsApp uses m4a with mp4 container
-            '.mp3': 'audio/mpeg',
-            '.wav': 'audio/wav',
-            '.aac': 'audio/aac',
-            '.mp4': 'audio/mp4'
-        };
-
-        // Add patterns to detect WhatsApp voice messages
-        this.whatsAppPatterns = [
-            /PTT-\d+/i,             // Android pattern (PTT-timestamp)
-            /AUD-\d+/i,             // iOS pattern (AUD-timestamp)
-            /WhatsApp Audio/i,      // General WhatsApp audio
-            /whatsapp.*\.m4a$/i,    // iOS WhatsApp m4a
-            /\.opus$/i              // Android WhatsApp opus
-        ];
-
-        // Add common iOS recording formats explicitly
-        this.supportedFormats.push('audio/x-m4a'); // Additional m4a format
-        this.supportedFormats.push('audio/mp4;codecs=mp4a.40.2'); // Explicit AAC-LC
+        // Track the audio format information for better error messages
+        this.lastAudioFormat = null;
+        this.lastAudioSize = 0;
         
-        // Add more diagnostic tracking
-        this.lastTranscriptionAttempt = null;
-        this.maxIOSRetries = 3; // Increase retries for iOS specifically
+        // Initialize with language from localStorage
+        this.language = localStorage.getItem('echolife_language') || 'en-US';
+        
+        // Listen for language changes
+        window.addEventListener('languageChanged', (e) => {
+            this.language = e.detail.language;
+            console.log(`Transcription service language set to: ${this.language}`);
+        });
     }
-
+    
     setApiKey(key) {
         this.apiKey = key;
     }
-
-    // Enhanced method to validate audio format
-    validateAudioFormat(audioBlob, metadata = {}) {
-        if (!audioBlob) {
-            throw new Error('No audio data provided');
-        }
-        
-        // Check if the format is supported
-        const isIOSDevice = metadata.isIOS || (/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream);
-        const iosVersion = metadata.iosVersion;
-        
-        // Check if this is likely a WhatsApp voice message by file extension or MIME type
-        let isWhatsApp = metadata.isWhatsApp;
-        
-        // If not explicitly set, detect WhatsApp format
-        if (!isWhatsApp && metadata.filename) {
-            isWhatsApp = this.whatsAppPatterns.some(pattern => pattern.test(metadata.filename));
-        }
-        
-        console.log(`Validating audio: ${audioBlob.size} bytes, type: ${audioBlob.type}, iOS: ${isIOSDevice}, WhatsApp: ${isWhatsApp}`);
-        
-        // Add better MIME type detection for empty or unknown types
-        let detectedType = audioBlob.type;
-        if (!detectedType || detectedType === '') {
-            // Try to detect type from filename extension
-            if (metadata.filename) {
-                const fileExt = metadata.filename.substring(metadata.filename.lastIndexOf('.')).toLowerCase();
-                if (this.formatExtensions[fileExt]) {
-                    detectedType = this.formatExtensions[fileExt];
-                    console.log(`Detected MIME type ${detectedType} from extension ${fileExt}`);
-                }
-            }
-            
-            // Special handling for WhatsApp voice messages
-            if (isWhatsApp) {
-                // iOS WhatsApp uses m4a format
-                if (isIOSDevice || (metadata.filename && metadata.filename.toLowerCase().endsWith('.m4a'))) {
-                    detectedType = 'audio/mp4';
-                    console.log('Using iOS WhatsApp voice message format: audio/mp4');
-                } else {
-                    // Android WhatsApp uses opus
-                    detectedType = 'audio/ogg; codecs=opus';
-                    console.log('Using Android WhatsApp voice message format: audio/ogg; codecs=opus');
-                }
-            }
-        }
-        
-        // More permissive check for iOS devices and WhatsApp formats - accept most formats
-        if (!this.supportedFormats.includes(detectedType) && detectedType !== '') {
-            console.warn(`Audio format ${detectedType} may not be fully supported by Whisper API. Supported formats include: ${this.supportedFormats.join(', ')}`);
-            
-            // Special message for WhatsApp/iOS
-            if (isWhatsApp) {
-                console.log("WhatsApp audio detected - will attempt processing anyway");
-            } else if (isIOSDevice) {
-                console.log("iOS device detected - will attempt processing anyway");
-            }
-        }
-        
-        // Check file size (Whisper has a 25MB limit)
-        if (audioBlob.size > 25 * 1024 * 1024) {
-            throw new Error('Audio file exceeds the 25MB size limit for Whisper API');
-        }
-        
-        if (audioBlob.size < 100) {
-            throw new Error('Audio file is too small (less than 100 bytes) and may be empty or corrupted');
-        }
-        
-        return true;
+    
+    setLanguage(language) {
+        this.language = language;
     }
-
-    // Try to extract error details from error response
-    parseApiError(response, errorData) {
-        const statusCode = response.status;
-        let errorMessage = 'Transcription failed: ';
-        
-        if (statusCode === 400) {
-            // Common 400 errors for audio issues
-            if (errorData.error?.message?.includes('format')) {
-                errorMessage += 'Invalid audio format. Please try a different recording method.';
-            } else if (errorData.error?.message?.includes('file')) {
-                errorMessage += 'Audio file is invalid or corrupted.';
-            } else {
-                errorMessage += errorData.error?.message || 'Bad request';
-            }
-        } else if (statusCode === 401) {
-            errorMessage += 'API key is invalid or expired. Please update your API key.';
-        } else if (statusCode === 429) {
-            errorMessage += 'Rate limit exceeded or insufficient quota for Whisper API.';
-        } else {
-            errorMessage += errorData.error?.message || response.statusText;
-        }
-        
-        console.error(`API Error (${statusCode}):`, errorData.error || response.statusText);
-        return errorMessage;
+    
+    getSubtitleData() {
+        return this.subtitleData;
     }
-
-    async transcribeAudio(audioData, retryCount = 0, language = null) {
+    
+    getLastErrorDetails() {
+        return this.lastError || { error: null, status: null, statusText: null };
+    }
+    
+    /**
+     * Test the Whisper API access using a minimal request
+     */
+    async testWhisperApiAccess() {
         if (!this.apiKey) {
-            throw new Error('API key not set for Whisper transcription service');
-        }
-
-        // Get translation settings
-        const translationSettings = window.translationController ? 
-            window.translationController.getSettings() : 
-            { language: 'en-US', translateEnabled: false };
-        
-        // Determine language for transcription (what language to detect)
-        // If not explicitly passed, use the interface language
-        if (!language) {
-            language = translationSettings.language;
+            return { success: false, message: "API key not set" };
         }
         
-        // Determine if we should translate
-        const translateEnabled = translationSettings.translateEnabled;
-        const translateTo = translateEnabled ? 
-            (language === 'pt-BR' ? 'en' : 'pt') : null;
-
-        // Store information about this attempt for diagnostics
-        this.lastTranscriptionAttempt = {
-            timestamp: new Date(),
-            retryCount: retryCount,
-            language: language,
-            translateEnabled: translateEnabled,
-            translateTo: translateTo,
-            audioInfo: audioData instanceof File ? 
-                       { name: audioData.name, type: audioData.type, size: audioData.size } :
-                       { type: audioData.type || 'unknown', size: audioData.blob?.size || 'unknown' }
-        };
-
-        // Clear previous error
-        this.transcriptionError = null;
-
-        // Handle both simple blob and metadata object formats
-        let audioBlob, metadata = {};
-        if (audioData.blob && typeof audioData.isIOS !== 'undefined') {
-            // New format with metadata
-            audioBlob = audioData.blob;
-            metadata = {
-                isIOS: audioData.isIOS,
-                iosVersion: audioData.iosVersion,
-                type: audioData.type,
-                chunks: audioData.chunks,
-                chunkSizes: audioData.chunkSizes,
-                isWhatsApp: audioData.isWhatsApp,
-                filename: audioData.filename,
-                preferredFormatForWhisper: audioData.preferredFormatForWhisper,
-                likelyCompatible: audioData.likelyCompatible,
-                codecInfo: audioData.codecInfo
-            };
-        } else if (audioData instanceof File) {
-            // Handle File objects directly
-            audioBlob = audioData;
-            metadata = {
-                filename: audioData.name,
-                type: audioData.type,
-                isWhatsApp: audioData.name.endsWith('.opus') || 
-                           audioData.name.match(/PTT-\d+/i) !== null ||
-                           audioData.name.match(/AUD-\d+/i) !== null || // iOS WhatsApp
-                           audioData.name.includes('WhatsApp Audio') ||
-                           audioData.type === 'audio/ogg' ||
-                           audioData.type.includes('opus')
-            };
-        } else {
-            // Original format (just the blob)
-            audioBlob = audioData;
-        }
-
+        // Create a small audio file for testing (1-second silent WebM)
+        const sampleAudio = this.createTestAudio();
+        
         try {
-            // If iOS, create a parallel audio file for transcription
-            if (metadata.isIOS) {
-                console.log("Creating parallel audio file for transcription on iOS");
-                const arrayBuffer = await audioBlob.arrayBuffer();
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const decoded = await audioCtx.decodeAudioData(arrayBuffer);
-                audioBlob = await this.bufferToWav(decoded);
-                metadata.filename = `ios_parallel_${Date.now()}.wav`;
-                metadata.type = 'audio/wav';
-            }
-            
-            // Validate audio format
-            this.validateAudioFormat(audioBlob, metadata);
-            
-            console.log(`Transcribing audio: ${audioBlob.size} bytes, format: ${audioBlob.type || 'unknown'}, language: ${language}, translate: ${translateEnabled ? translateTo : 'disabled'}`);
-            
-            // Determine appropriate file extension based on audio type
-            let fileExtension = 'webm';
-            let type = audioBlob.type ? audioBlob.type.toLowerCase() : '';
-            
-            // Use more reliable format detection
-            if (metadata.isIOS) {
-                // iOS devices should almost always use m4a/mp4 format for best compatibility
-                fileExtension = 'm4a';
-                type = 'audio/mp4';
-                console.log("Using iOS-optimized audio format: audio/mp4 (.m4a)");
-            } else if (metadata.isWhatsApp) {
-                // Better detection for WhatsApp audio
-                if (metadata.filename && metadata.filename.endsWith('.m4a')) {
-                    // iOS WhatsApp uses m4a
-                    fileExtension = 'm4a';
-                    type = 'audio/mp4';
-                } else if (metadata.filename && metadata.filename.endsWith('.opus')) {
-                    // Android WhatsApp uses opus
-                    fileExtension = 'opus';
-                    type = 'audio/ogg; codecs=opus';
-                } else {
-                    // Default to ogg for other WhatsApp formats
-                    fileExtension = 'ogg';
-                    type = 'audio/ogg';
-                }
-            } else if (type.includes('mp4') || type.includes('m4a')) {
-                fileExtension = 'mp4';
-            } else if (type.includes('mp3') || type.includes('mpeg')) {
-                fileExtension = 'mp3';
-            } else if (type.includes('wav')) {
-                fileExtension = 'wav';
-            } else if (type.includes('aac')) {
-                fileExtension = 'aac';
-            } else if (type.includes('ogg') || type.includes('opus')) {
-                fileExtension = 'ogg';
-            } else if (metadata.filename) {
-                // Try to get extension from filename if MIME type is unknown
-                const nameParts = metadata.filename.split('.');
-                if (nameParts.length > 1) {
-                    const ext = nameParts[nameParts.length - 1].toLowerCase();
-                    if (['mp3', 'wav', 'm4a', 'mp4', 'ogg', 'opus', 'aac'].includes(ext)) {
-                        fileExtension = ext;
-                    }
-                }
-            }
-            
+            // Prepare form data for the API request
             const formData = new FormData();
-            
-            // Enhanced filename generation with more metadata
-            const uniqueId = Date.now();
-            let filename;
-            
-            if (metadata.isIOS) {
-                // Use simpler filename pattern with clear format indication for diagnostic purposes
-                const format = audioBlob.type.split('/')[1]?.split(';')[0] || 'audio';
-                filename = `ios_whisper_${format}_${uniqueId}.${fileExtension}`;
-                console.log(`Using diagnostic filename for iOS: ${filename}`);
-            } else if (metadata.isWhatsApp) {
-                const isIOSWhatsApp = metadata.filename && metadata.filename.endsWith('.m4a');
-                filename = isIOSWhatsApp 
-                    ? `whatsapp_ios_${uniqueId}.${fileExtension}`
-                    : `whatsapp_${uniqueId}.${fileExtension}`;
-            } else if (metadata.filename) {
-                // Keep original filename but ensure the extension is correct
-                const baseName = metadata.filename.split('.').slice(0, -1).join('.');
-                filename = `${baseName}_${uniqueId}.${fileExtension}`;
-            } else {
-                filename = `recording_${uniqueId}.${fileExtension}`;
-            }
-                
-            formData.append('file', audioBlob, filename);
+            formData.append('file', sampleAudio, 'test.webm');
             formData.append('model', 'whisper-1');
+            formData.append('language', 'en');
+            formData.append('response_format', 'json');
             
-            // Request response_format=verbose_json to get word-level timestamps
-            formData.append('response_format', 'verbose_json');
-            
-            // Add language parameter for better transcription (the source language to detect)
-            const languageCode = language === 'pt-BR' ? 'pt' : 'en';
-            formData.append('language', languageCode);
-            
-            // Add translation parameter if translation is enabled
-            if (translateEnabled && translateTo) {
-                console.log(`Adding translation to ${translateTo}`);
-                formData.append('translate', 'true');
-                // Note: With translate=true, the 'language' parameter still identifies the source language,
-                // but Whisper will translate to English. We set translate=true only when needed.
-            }
-            
-            console.log(`Sending request to Whisper API with filename: ${filename}, language: ${languageCode}, translate: ${translateEnabled}`);
-            
-            const timeoutMs = 60000;
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-            
+            // Send a request to the Whisper API endpoint
             const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${this.apiKey}`
                 },
-                body: formData,
-                signal: controller.signal
-            }).finally(() => clearTimeout(timeoutId));
+                body: formData
+            });
             
-            if (!response.ok) {
-                const errorData = await response.json();
-                console.error('Whisper API error:', errorData);
-                
-                // Store detailed error information
-                this.transcriptionError = {
+            // Process the response
+            if (response.ok) {
+                return { success: true, message: "Whisper API access confirmed" };
+            } else {
+                const error = await response.json();
+                return { 
+                    success: false, 
+                    message: `API error: ${error.error?.message || response.statusText}`,
                     status: response.status,
-                    statusText: response.statusText,
-                    error: errorData.error,
-                    fullError: errorData
+                    error: error.error
                 };
-                
-                // Create better error message
-                const errorMessage = this.parseApiError(response, errorData);
-                
-                throw new Error(errorMessage);
             }
-            
-            const data = await response.json();
-            console.log('Transcription successful with timestamps');
-            
-            // Store the segment data for subtitle generation
-            this.lastTranscriptionSegments = data.segments || [];
-            
-            // Return the full text
-            return data.text;
         } catch (error) {
-            console.error('Error transcribing audio:', error);
-            // Fallback for iOS: if transcription fails, use speech recognition text blocks
-            if (metadata.isIOS) {
-                const fallbackText = (this.speechRecognitionBlocks && this.speechRecognitionBlocks.length)
-                    ? this.speechRecognitionBlocks.join(" ")
-                    : "Fallback transcription not available.";
-                return fallbackText + " (Warning: Could not save audio due to iOS issues.)";
-            }
-            throw error;
+            return { success: false, message: `Request error: ${error.message}` };
         }
     }
     
-    // NEW: Helper method to get file extension from MIME type
-    getExtensionForMimeType(mimeType) {
-        if (mimeType.includes('wav')) return 'wav';
-        if (mimeType.includes('mp4') || mimeType.includes('m4a')) return 'm4a';
-        if (mimeType.includes('mp3') || mimeType.includes('mpeg')) return 'mp3';
-        if (mimeType.includes('ogg')) return 'ogg';
-        if (mimeType.includes('opus')) return 'opus';
-        return 'audio';
-    }
-    
-    // Get last transcription error details
-    getLastErrorDetails() {
-        return this.transcriptionError || { message: "No error information available" };
-    }
-
-    // New method to test API key and Whisper API access
-    async testWhisperApiAccess(language = null) {
-        if (!this.apiKey) {
-            return { success: false, message: 'API key not set' };
+    /**
+     * Create a small test audio for API validation
+     */
+    createTestAudio() {
+        // Create a silent WAV file that meets the 0.1 second minimum requirement
+        // Sample rate: 16000 Hz, 1 channel, 16-bit PCM
+        const sampleRate = 16000;
+        const duration = 0.2; // 200ms (exceeds the 0.1s minimum)
+        const numSamples = Math.floor(sampleRate * duration);
+        
+        // Create sample data (silence = all zeros)
+        const samples = new Float32Array(numSamples);
+        for (let i = 0; i < numSamples; i++) {
+            samples[i] = 0.0; // Silent audio (zeros)
         }
         
-        // Get the current app language if not specified
-        if (!language) {
-            language = localStorage.getItem('echolife_language') || 'en-US';
+        // Convert to 16-bit PCM
+        const pcmData = new Int16Array(numSamples);
+        for (let i = 0; i < numSamples; i++) {
+            pcmData[i] = 0; // Silent audio
+        }
+        
+        // Create WAV header
+        const headerSize = 44;
+        const dataSize = pcmData.length * 2; // 2 bytes per sample (16-bit)
+        const fileSize = headerSize + dataSize;
+        
+        const header = new ArrayBuffer(headerSize);
+        const view = new DataView(header);
+        
+        // "RIFF" chunk descriptor
+        view.setUint8(0, 'R'.charCodeAt(0));
+        view.setUint8(1, 'I'.charCodeAt(0));
+        view.setUint8(2, 'F'.charCodeAt(0));
+        view.setUint8(3, 'F'.charCodeAt(0));
+        view.setUint32(4, fileSize - 8, true); // File size - 8
+        view.setUint8(8, 'W'.charCodeAt(0));
+        view.setUint8(9, 'A'.charCodeAt(0));
+        view.setUint8(10, 'V'.charCodeAt(0));
+        view.setUint8(11, 'E'.charCodeAt(0));
+        
+        // "fmt " sub-chunk
+        view.setUint8(12, 'f'.charCodeAt(0));
+        view.setUint8(13, 'm'.charCodeAt(0));
+        view.setUint8(14, 't'.charCodeAt(0));
+        view.setUint8(15, ' '.charCodeAt(0));
+        view.setUint32(16, 16, true); // Subchunk size
+        view.setUint16(20, 1, true);  // Audio format (PCM)
+        view.setUint16(22, 1, true);  // Num channels (mono)
+        view.setUint32(24, sampleRate, true); // Sample rate
+        view.setUint32(28, sampleRate * 2, true); // Byte rate
+        view.setUint16(32, 2, true);  // Block align
+        view.setUint16(34, 16, true); // Bits per sample
+        
+        // "data" sub-chunk
+        view.setUint8(36, 'd'.charCodeAt(0));
+        view.setUint8(37, 'a'.charCodeAt(0));
+        view.setUint8(38, 't'.charCodeAt(0));
+        view.setUint8(39, 'a'.charCodeAt(0));
+        view.setUint32(40, dataSize, true); // Data chunk size
+        
+        // Combine header and audio data
+        const wavBytes = new Uint8Array(fileSize);
+        wavBytes.set(new Uint8Array(header), 0);
+        wavBytes.set(new Uint8Array(pcmData.buffer), headerSize);
+        
+        console.log(`Created test audio: ${fileSize} bytes, ${duration}s duration, ${sampleRate}Hz`);
+        
+        // Create blob with proper MIME type
+        return new Blob([wavBytes], { type: 'audio/wav' });
+    }
+    
+    /**
+     * Transcribe audio using the Whisper API
+     * @param {Object} audioData - Object containing the audio data
+     * @param {Blob} audioData.blob - The audio blob to transcribe
+     * @param {string} audioData.type - The MIME type of the audio
+     * @returns {Promise<string>} - The transcription text
+     */
+    async transcribeAudio(audioData) {
+        if (!this.apiKey) {
+            throw new Error('API key not set. Please set your OpenAI API key.');
+        }
+        
+        if (!audioData || !audioData.blob) {
+            throw new Error('No audio data provided.');
         }
         
         try {
-            // Create a simple, valid audio file instead of an empty one
-            // This approach creates a minimal but valid audio file with a short beep
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const sampleRate = audioContext.sampleRate;
-            const buffer = audioContext.createBuffer(1, sampleRate, sampleRate);
+            // Store audio format info for debugging
+            this.lastAudioFormat = audioData.type;
+            this.lastAudioSize = audioData.blob.size;
             
-            // Fill buffer with a simple sine wave (short beep)
-            const channelData = buffer.getChannelData(0);
-            for (let i = 0; i < sampleRate * 0.5; i++) {
-                // Create 0.5 second beep at 440Hz
-                channelData[i] = Math.sin(i * Math.PI * 2 * 440 / sampleRate) * 0.5;
+            // Log validation info
+            console.log(`Validating audio: ${audioData.blob.size} bytes, type: ${audioData.type}, iOS: ${audioData.isIOS || false}, WhatsApp: ${audioData.isWhatsApp || false}`);
+            
+            // Check if format is suitable for Whisper API
+            const supportedFormats = [
+                'audio/webm',
+                'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/m4a', 'audio/mp4', 'audio/aac',
+                'audio/x-m4a', 'audio/ogg', 'audio/opus', 'audio/ogg; codecs=opus',
+                'audio/x-m4a', 'audio/mp4;codecs=mp4a.40.2'
+            ];
+            
+            // Check if the format needs conversion
+            // NOTE: audio/webm with opus codec often needs conversion for Whisper
+            const needsConversion = audioData.type === 'audio/webm;codecs=opus' || 
+                                   !supportedFormats.some(format => audioData.type.includes(format));
+            
+            if (needsConversion) {
+                console.log(`Audio format ${audioData.type} may not be fully supported by Whisper API. Supported formats include: ${supportedFormats.join(', ')}`);
+                console.log(`Attempting to convert to a better format for Whisper API...`);
+                
+                // Convert WebM with Opus to standard WAV for Whisper compatibility
+                const convertedBlob = await this.convertToWAV(audioData.blob);
+                if (convertedBlob) {
+                    console.log(`Successfully converted audio to WAV format (${convertedBlob.size} bytes)`);
+                    audioData.blob = convertedBlob;
+                    audioData.type = 'audio/wav';
+                } else {
+                    console.warn(`Conversion failed, will try with original format`);
+                }
             }
             
-            // Convert to WAV format which is better supported
-            const wavBlob = await this.bufferToWav(buffer);
+            // Identify language code for Whisper API
+            const languageMap = {
+                'en-US': 'en',
+                'pt-BR': 'pt'
+            };
             
-            // Test API connectivity with a minimal request instead of a full transcription
-            const response = await fetch('https://api.openai.com/v1/models', {
-                method: 'GET',
+            const whisperLang = languageMap[this.language] || 'en';
+            
+            // Default to not translating unless translation toggle is enabled 
+            // and target language is English
+            const translateEnabled = false; // Default to false - change if needed
+            
+            // Prepare the form data
+            const formData = new FormData();
+            
+            // Add a timestamp to the filename to avoid caching issues
+            const timestamp = Date.now();
+            
+            // Use a filename extension that matches the content type
+            let fileExt = 'webm';
+            if (audioData.type.includes('mp3') || audioData.type.includes('mpeg')) {
+                fileExt = 'mp3';
+            } else if (audioData.type.includes('wav')) {
+                fileExt = 'wav';
+            } else if (audioData.type.includes('m4a') || audioData.type.includes('mp4')) {
+                fileExt = 'mp4';
+            } else if (audioData.type.includes('ogg') || audioData.type.includes('opus')) {
+                fileExt = 'ogg';
+            }
+            
+            const filename = `recording_${timestamp}_${audioData.timestamp || timestamp}.${fileExt}`;
+            
+            console.log(`Transcribing audio: ${audioData.blob.size} bytes, format: ${audioData.type}, language: ${this.language}, translate: ${translateEnabled ? 'enabled' : 'disabled'}`);
+            
+            // Add the audio file to the form
+            formData.append('file', audioData.blob, filename);
+            formData.append('model', 'whisper-1');
+            formData.append('language', whisperLang);
+            formData.append('response_format', 'verbose_json');
+            formData.append('timestamp_granularities', ['word']);
+            
+            // Add translation flag if needed
+            if (translateEnabled) {
+                formData.append('translate', 'true');
+                console.log('Translating audio to English');
+            }
+            
+            // Log the request details
+            console.log(`Sending request to Whisper API with filename: ${filename}, language: ${whisperLang}, translate: ${translateEnabled}`);
+            
+            // Make the API request
+            const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+                method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${this.apiKey}`,
-                    'Content-Type': 'application/json'
-                }
+                    'Authorization': `Bearer ${this.apiKey}`
+                },
+                body: formData
             });
             
+            console.log('\n', response);
+            
+            // Handle unsuccessful responses
             if (!response.ok) {
-                const error = await response.json();
-                throw new Error(`API connectivity issue: ${error.error?.message || response.statusText}`);
+                this.lastError = {
+                    status: response.status,
+                    statusText: response.statusText,
+                    error: null
+                };
+                
+                try {
+                    const errorResult = await response.json();
+                    this.lastError.error = errorResult.error;
+                    console.log(`API Error (${response.status}): `, errorResult);
+                    throw new Error(`Transcription failed: ${errorResult.error?.message || `HTTP ${response.status}: ${response.statusText}`}`);
+                } catch (jsonErr) {
+                    // If JSON parsing fails, use the HTTP status text
+                    throw new Error(`Transcription failed: HTTP ${response.status}: ${response.statusText}`);
+                }
             }
             
-            // Get success message in the current language
-            const successMsg = language === 'pt-BR' ? 
-                'API da OpenAI está acessível. O Whisper deve funcionar quando você gravar áudio.' : 
-                'OpenAI API is accessible. Whisper should work when you record audio.';
+            // Parse the results
+            const result = await response.json();
             
-            // If we get here, API access is good
-            return { 
-                success: true, 
-                message: successMsg 
-            };
+            // Store subtitle data with word-level timestamps if available
+            if (result.words && result.words.length > 0) {
+                this.processWordLevelTimestamps(result.words);
+            } else {
+                // Generate estimated subtitle data if word-level data not available
+                this.generateSubtitleData(result.text);
+            }
+            
+            return result.text;
         } catch (error) {
-            const errorMsg = language === 'pt-BR' ? 
-                `Teste de API falhou: ${error.message}` : 
-                `API test failed: ${error.message}`;
-                
-            return { 
-                success: false, 
-                message: errorMsg, 
-                error 
-            };
+            console.error('Error transcribing audio:', error);
+            
+            // Format error message for user display
+            let errorMessage = error.message || 'Unknown error';
+            
+            // Provide more helpful error messages based on common failures
+            if (errorMessage.includes('file format')) {
+                errorMessage = `Invalid audio format. Please try a different recording method.`;
+            } else if (errorMessage.includes('API key')) {
+                errorMessage = `Invalid API key. Please check your OpenAI API key.`;
+            } else if (errorMessage.includes('insufficient_quota')) {
+                errorMessage = `Your OpenAI account has insufficient quota. Please check your billing status.`;
+            }
+            
+            throw new Error(`Transcription failed: ${errorMessage}`);
         }
     }
 
-    // Helper method to convert AudioBuffer to WAV format
-    bufferToWav(buffer) {
-        return new Promise((resolve) => {
-            const length = buffer.length * buffer.numberOfChannels * 2;
-            const view = new DataView(new ArrayBuffer(44 + length));
+    /**
+     * Convert WebM/Opus audio to WAV format for better Whisper API compatibility
+     * @param {Blob} audioBlob - The WebM audio blob
+     * @returns {Promise<Blob>} - WAV format blob
+     */
+    async convertToWAV(audioBlob) {
+        return new Promise((resolve, reject) => {
+            console.time('audio-conversion');
+            // Create audio context with lower sample rate for smaller file size
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            const audioContext = new AudioContext({
+                sampleRate: 16000 // Whisper works well with 16kHz audio, lower sample rate = smaller file
+            });
             
-            // RIFF identifier
-            writeString(view, 0, 'RIFF');
-            // RIFF chunk length
-            view.setUint32(4, 36 + length, true);
-            // RIFF type
-            writeString(view, 8, 'WAVE');
-            // format chunk identifier
-            writeString(view, 12, 'fmt ');
-            // format chunk length
-            view.setUint32(16, 16, true);
-            // sample format (1 is PCM)
-            view.setUint16(20, 1, true);
-            // channel count
-            view.setUint16(22, buffer.numberOfChannels, true);
-            // sample rate
-            view.setUint32(24, buffer.sampleRate, true);
-            // byte rate (sample rate * block align)
-            view.setUint32(28, buffer.sampleRate * buffer.numberOfChannels * 2, true);
-            // block align (channel count * bytes per sample)
-            view.setUint16(32, buffer.numberOfChannels * 2, true);
-            // bits per sample
-            view.setUint16(34, 16, true);
-            // data chunk identifier
-            writeString(view, 36, 'data');
-            // data chunk length
-            view.setUint32(40, length, true);
+            // Create file reader to read the blob
+            const reader = new FileReader();
             
-            // Write the PCM samples
-            let offset = 44;
-            for (let i = 0; i < buffer.length; i++) {
-                for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
-                    const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[i]));
-                    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-                    offset += 2;
+            reader.onload = async function(e) {
+                try {
+                    // Decode the audio data
+                    const audioData = await audioContext.decodeAudioData(e.target.result);
+                    
+                    // Get the PCM data (mono)
+                    const pcmData = audioData.getChannelData(0);
+                    
+                    // Compress the data if it's large (above 1 minute of audio)
+                    let compressedData = pcmData;
+                    if (pcmData.length > 960000) { // More than 1 minute at 16kHz
+                        console.log(`[TRANSCRIPTION] Compressing audio data (${pcmData.length} samples)`);
+                        compressedData = compressPCM(pcmData);
+                        console.log(`[TRANSCRIPTION] Compressed to ${compressedData.length} samples`);
+                    }
+                    
+                    // Create WAV file
+                    const wavBlob = createWaveBlob(compressedData, audioContext.sampleRate);
+                    console.timeEnd('audio-conversion');
+                    resolve(wavBlob);
+                } catch (error) {
+                    console.error('Error converting audio:', error);
+                    console.timeEnd('audio-conversion');
+                    resolve(null); // Return null instead of rejecting to allow fallback
                 }
-            }
+            };
             
-            // Create Blob and resolve
-            const wavBlob = new Blob([view], { type: 'audio/wav' });
-            resolve(wavBlob);
+            reader.onerror = function(error) {
+                console.error('Error reading audio file:', error);
+                console.timeEnd('audio-conversion');
+                resolve(null); // Return null instead of rejecting to allow fallback
+            };
             
-            function writeString(view, offset, string) {
-                for (let i = 0; i < string.length; i++) {
-                    view.setUint8(offset + i, string.charCodeAt(i));
-                }
-            }
+            // Read the blob as array buffer
+            reader.readAsArrayBuffer(audioBlob);
         });
-    }
-
-    // Get subtitle data from the last transcription
-    getSubtitleData() {
-        if (!this.lastTranscriptionSegments || this.lastTranscriptionSegments.length === 0) {
-            // Fallback if no segments data is available
-            return null;
+        
+        // Helper function to compress PCM data by downsampling
+        function compressPCM(pcmData) {
+            // Simple audio compression by downsampling if needed
+            // If audio is > 1 minute, downsample by 1.5x
+            if (pcmData.length > 960000) {
+                const downsampleFactor = 1.5;
+                const newLength = Math.floor(pcmData.length / downsampleFactor);
+                const downsampled = new Float32Array(newLength);
+                
+                for (let i = 0; i < newLength; i++) {
+                    downsampled[i] = pcmData[Math.floor(i * downsampleFactor)];
+                }
+                
+                return downsampled;
+            }
+            
+            return pcmData;
         }
         
-        // Convert Whisper segments to our subtitle format
-        return this.lastTranscriptionSegments.map(segment => {
-            return {
-                startTime: segment.start,
-                endTime: segment.end,
-                text: segment.text.trim()
-            };
+        // Helper function to create WAV blob from PCM data
+        function createWaveBlob(pcmData, sampleRate) {
+            // Convert Float32Array to Int16Array
+            const int16Data = new Int16Array(pcmData.length);
+            for (let i = 0; i < pcmData.length; i++) {
+                // Convert float to int16
+                const s = Math.max(-1, Math.min(1, pcmData[i]));
+                int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            
+            // Create WAV header
+            const wavHeader = createWavHeader(int16Data.length, sampleRate);
+            
+            // Combine header and audio data
+            const wavBytes = new Uint8Array(wavHeader.length + int16Data.length * 2);
+            wavBytes.set(wavHeader, 0);
+            
+            // Add PCM data (need to convert Int16Array to Uint8Array)
+            const pcmBytes = new Uint8Array(int16Data.buffer);
+            wavBytes.set(pcmBytes, wavHeader.length);
+            
+            // Create blob
+            return new Blob([wavBytes], { type: 'audio/wav' });
+        }
+        
+        // Helper function to create WAV header
+        function createWavHeader(dataLength, sampleRate) {
+            const dataSize = dataLength * 2; // 2 bytes per sample (16-bit)
+            const header = new ArrayBuffer(44);
+            const view = new DataView(header);
+            
+            // "RIFF" chunk descriptor
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + dataSize, true);
+            writeString(view, 8, 'WAVE');
+            
+            // "fmt " sub-chunk
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true); // Subchunk size
+            view.setUint16(20, 1, true); // Audio format (PCM)
+            view.setUint16(22, 1, true); // Num channels (mono)
+            view.setUint32(24, sampleRate, true); // Sample rate
+            view.setUint32(28, sampleRate * 2, true); // Byte rate
+            view.setUint16(32, 2, true); // Block align
+            view.setUint16(34, 16, true); // Bits per sample
+            
+            // "data" sub-chunk
+            writeString(view, 36, 'data');
+            view.setUint32(40, dataSize, true);
+            
+            return new Uint8Array(header);
+        }
+        
+        // Helper to write string to DataView
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+    }
+    
+    /**
+     * Process word-level timestamps from Whisper API response
+     * @param {Array} words - Word objects with start, end, and word properties
+     */
+    processWordLevelTimestamps(words) {
+        // Clear existing subtitle data
+        this.subtitleData = [];
+        
+        // Group words into sensible subtitle segments (max 10 words per segment)
+        const maxWordsPerSegment = 10;
+        let currentSegment = {
+            startTime: words[0].start,
+            endTime: words[0].end,
+            text: words[0].word.trim(),
+            words: [words[0]]
+        };
+        
+        for (let i = 1; i < words.length; i++) {
+            const word = words[i];
+            
+            // Add word to current segment if under the limit
+            if (currentSegment.words.length < maxWordsPerSegment) {
+                currentSegment.text += ' ' + word.word.trim();
+                currentSegment.words.push(word);
+                currentSegment.endTime = word.end;
+            } else {
+                // Save current segment and start a new one
+                this.subtitleData.push({
+                    startTime: currentSegment.startTime,
+                    endTime: currentSegment.endTime,
+                    text: currentSegment.text
+                });
+                
+                // Start new segment
+                currentSegment = {
+                    startTime: word.start,
+                    endTime: word.end,
+                    text: word.word.trim(),
+                    words: [word]
+                };
+            }
+        }
+        
+        // Add the last segment
+        if (currentSegment.words.length > 0) {
+            this.subtitleData.push({
+                startTime: currentSegment.startTime,
+                endTime: currentSegment.endTime,
+                text: currentSegment.text
+            });
+        }
+        
+        console.log(`Generated ${this.subtitleData.length} subtitle segments from word-level timestamps`);
+    }
+    
+    /**
+     * Generate subtitle data from text without timestamps
+     * @param {string} text - The transcribed text
+     */
+    generateSubtitleData(text) {
+        // Split the text into sentences
+        const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+        this.subtitleData = [];
+        
+        // Approximate 3 words per second for timing
+        const wordsPerSecond = 3;
+        let startTime = 0;
+        
+        sentences.forEach(sentence => {
+            const wordCount = sentence.split(/\s+/).length;
+            const duration = wordCount / wordsPerSecond;
+            const endTime = startTime + duration;
+            
+            this.subtitleData.push({
+                startTime,
+                endTime,
+                text: sentence.trim()
+            });
+            
+            // Update start time for next sentence
+            startTime = endTime;
         });
+        
+        console.log(`Generated ${this.subtitleData.length} estimated subtitle segments`);
     }
 }
 
 // Create a global instance of the transcription service
 const transcriptionService = new WhisperTranscriptionService();
 
-// Make it available on window for better accessibility
+// Make it globally available
 window.transcriptionService = transcriptionService;

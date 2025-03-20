@@ -39,7 +39,7 @@ class IOSSpeechService {
             console.log(`iOS Speech Service initialized. Version: ${this.iosVersion || 'unknown'}, Language: ${this.currentLanguage}`);
         } else {
             // For safety, on non‐iOS or if not available log and set recognition to null
-            console.warn('iOS native speech recognition is not available on this device.');
+            console.info('iOS native speech recognition is not available on this device. This is EXPECTED on non-iOS devices and can be safely ignored.');
             this.recognition = null;
         }
     }
@@ -328,6 +328,15 @@ class IOSSpeechService {
     // Get the current language
     getLanguage() {
         return this.currentLanguage;
+    }
+
+    isAvailable() {
+        // This check will fail on non-iOS devices, which is expected behavior
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        if (!isIOS) {
+            console.info("iOS speech detection warning is normal on non-iOS devices and can be safely ignored.");
+        }
+        return this.isIOS && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
     }
 }
 

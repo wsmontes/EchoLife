@@ -288,16 +288,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (timeSinceLastEvent > 10000) {
                         console.log('Speech recognition appears to be stalled, restarting...');
                         try {
-                            window.speechRecognition.stop();
-                            setTimeout(() => {
-                                try {
-                                    window.speechRecognition.start();
-                                } catch (e) {
-                                    console.error('Failed to restart stalled speech recognition:', e);
-                                }
-                            }, 500);
+                            // Check if already running before trying to stop
+                            if (window.speechRecognition && window.speechRecognitionActive) {
+                                window.speechRecognition.stop();
+                                window.speechRecognitionActive = false;
+                                console.log('Stopped stalled speech recognition');
+                                
+                                // Use setTimeout to ensure complete stop before restarting
+                                setTimeout(() => {
+                                    try {
+                                        window.speechRecognition.start();
+                                        window.speechRecognitionActive = true;
+                                        console.log('Successfully restarted speech recognition');
+                                        window.lastSpeechRecognitionEvent = Date.now();
+                                    } catch (startError) {
+                                        console.error('Failed to restart speech recognition:', startError);
+                                    }
+                                }, 300);
+                            }
                         } catch (e) {
-                            console.error('Error stopping stalled speech recognition:', e);
+                            console.error('Error handling stalled speech recognition:', e);
                         }
                     }
                 }
@@ -315,28 +325,35 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Don't update tags too frequently - at most once every 1.5 seconds
         if (now - lastTagUpdateTime > 1500 && text.length > 10) {
+            console.log(`[SPEECH] Processing speech for tags (${now - lastTagUpdateTime}ms since last update)`);
+            console.log(`[SPEECH] Text to process: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
             lastTagUpdateTime = now;
-            console.log("Updating real-time tags with text length:", text.length);
             await updateRealtimeTags(text);
+        } else {
+            const timeToNextUpdate = Math.max(0, 1500 - (now - lastTagUpdateTime));
+            console.log(`[SPEECH] Skipping update, next update in ${timeToNextUpdate}ms (text length: ${text.length})`);
         }
     }
     
     // Update tags in real-time during speech with better iOS handling
     async function updateRealtimeTags(text) {
         try {
+            console.log(`[REALTIME-TAGS] Starting tag update process with ${text.length} chars of text`);
             // For very short text, use a placeholder
             if (text.length < 15) {
+                console.log('[REALTIME-TAGS] Text too short, using placeholder');
                 if (window.wordCloud) {
                     const language = getEffectiveLanguage();
                     const placeholderText = language === 'pt-BR' ? 'Ouvindo...' : 'Listening...';
+                    console.log(`[REALTIME-TAGS] Using placeholder: "${placeholderText}"`);
                     window.wordCloud.updateWordCloud([
                         {text: placeholderText, confidence: 'low', count: 1, group: "other"}
                     ]);
                 } else {
-                    console.error("Word cloud not initialized or not found!");
+                    console.error("[REALTIME-TAGS] Word cloud not initialized or not found!");
                     // Try to initialize word cloud if it doesn't exist
                     if (document.getElementById('wordCloudContainer')) {
-                        console.log("Trying to re-initialize word cloud");
+                        console.log("[REALTIME-TAGS] Trying to re-initialize word cloud");
                         window.wordCloud = new WordCloud('wordCloudContainer');
                     }
                 }
@@ -345,14 +362,17 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Get the effective language - prioritize iOS service language if available
             const language = getEffectiveLanguage();
-            console.log(`Extracting real-time tags with language: ${language}, text length: ${text.length}`);
+            console.log(`[REALTIME-TAGS] Extracting real-time tags with language: ${language}, text length: ${text.length}`);
             
             // Extract tags from the partial transcript with explicit language
+            console.time('tag-extraction-total');
+            console.log(`[REALTIME-TAGS] Calling tagExtractor.extractTagsRealtime with ${text.length} chars`);
             const tags = await tagExtractor.extractTagsRealtime(text, 5, language);
+            console.timeEnd('tag-extraction-total');
             
             // Validate we have actual tags
             if (!tags || tags.length === 0) {
-                console.warn("No tags extracted, using placeholder");
+                console.warn("[REALTIME-TAGS] No tags extracted, using placeholder");
                 if (window.wordCloud) {
                     const processingText = language === 'pt-BR' ? 'Processando...' : 'Processing...';
                     window.wordCloud.updateWordCloud([
@@ -362,17 +382,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             
-            console.log(`Updating word cloud with tags: ${tags.length}, language: ${language}`);
+            console.log(`[REALTIME-TAGS] Got ${tags.length} tags for word cloud:`, tags);
             
             // Update word cloud with tags - add extra check for wordCloud
             if (window.wordCloud) {
-                console.log(`Updating word cloud with ${tags.length} tags, language: ${language}`);
+                console.log(`[REALTIME-TAGS] Updating word cloud with ${tags.length} tags, language: ${language}`);
                 window.wordCloud.updateWordCloud(tags);
             } else {
-                console.error("Word cloud not available for tag update!");
+                console.error("[REALTIME-TAGS] Word cloud not available for tag update!");
                 // Try to initialize word cloud if it doesn't exist
                 if (document.getElementById('wordCloudContainer')) {
-                    console.log("Trying to re-initialize word cloud");
+                    console.log("[REALTIME-TAGS] Trying to re-initialize word cloud");
                     window.wordCloud = new WordCloud('wordCloudContainer');
                     window.wordCloud.updateWordCloud(tags);
                 }
@@ -383,7 +403,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 feedbackButton.disabled = false;
             }
         } catch (error) {
-            console.error('Error updating real-time tags:', error);
+            console.error('[REALTIME-TAGS] Error updating real-time tags:', error);
             // Don't fail silently - update with error state
             if (window.wordCloud) {
                 const language = getEffectiveLanguage();
@@ -393,30 +413,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 ]);
             }
         }
-    }
-    
-    // Helper function to get the effective language from all possible sources
-    function getEffectiveLanguage() {
-        // Check multiple sources in priority order:
-        
-        // 1. First check translation controller if available
-        if (window.translationController) {
-            const settings = window.translationController.getSettings();
-            console.log("Language from translation controller:", settings.language);
-            return settings.language;
-        }
-        
-        // 2. Next check iOS speech service if active (most accurate during recording)
-        if (window.iosSpeechService && window.iosSpeechService.isAvailable) {
-            const iosLang = window.iosSpeechService.getLanguage();
-            console.log("Language from iOS speech service:", iosLang);
-            return iosLang;
-        }
-        
-        // 3. Finally fall back to localStorage
-        const storedLang = localStorage.getItem('echolife_language') || 'en-US';
-        console.log("Language from localStorage:", storedLang);
-        return storedLang;
     }
     
     async function toggleRecording() {
@@ -1607,4 +1603,31 @@ function updateAriaAttributes(section) {
         sectionContent.setAttribute('aria-hidden', isCollapsed);
     }
 }
+
+// Helper function to get the effective language from all possible sources
+function getEffectiveLanguage() {
+    // Check multiple sources in priority order:
+    
+    // 1. First check translation controller if available
+    if (window.translationController) {
+        const settings = window.translationController.getSettings();
+        console.log("[LANGUAGE] From translation controller:", settings.language);
+        return settings.language;
+    }
+    
+    // 2. Next check iOS speech service if active (most accurate during recording)
+    if (window.iosSpeechService && window.iosSpeechService.isAvailable) {
+        const iosLang = window.iosSpeechService.getLanguage();
+        console.log("[LANGUAGE] From iOS speech service:", iosLang);
+        return iosLang;
+    }
+    
+    // 3. Finally fall back to localStorage
+    const storedLang = localStorage.getItem('echolife_language') || 'en-US';
+    console.log("[LANGUAGE] From localStorage:", storedLang);
+    return storedLang;
+}
+
+// Make function available globally to prevent reference errors
+window.getEffectiveLanguage = getEffectiveLanguage;
 });

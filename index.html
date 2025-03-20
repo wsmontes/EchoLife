@@ -181,25 +181,46 @@
     <script>
         // Initialize the word cloud when DOM is loaded
         document.addEventListener('DOMContentLoaded', function() {
-            // Create a global word cloud instance
-            window.wordCloud = new WordCloud('wordCloudContainer');
-            console.log('Word cloud initialized');
-            
-            // Update translation toggle label based on current language
-            const updateToggleLabel = () => {
-                const languageSelector = document.getElementById('languageSelector');
-                const toggleLabel = document.getElementById('translationToggleLabel');
-                
-                if (toggleLabel) {
-                    toggleLabel.textContent = languageSelector.value === 'pt-BR' ? 'Tradução' : 'Translate';
+            // Make sure WordCloud is initialized first
+            if (typeof WordCloud === 'undefined') {
+                console.error('WordCloud is not defined. Check if word-cloud.js is loaded properly.');
+            } else {
+                try {
+                    // Initialize the word cloud with the container ID
+                    window.wordCloud = new WordCloud('wordCloudContainer');
+                    console.log('Word cloud initialized');
+                } catch (error) {
+                    console.error('Error initializing WordCloud:', error);
                 }
-            };
+            }
             
-            // Initialize label on page load
-            updateToggleLabel();
-            
-            // Update label when language changes
-            document.getElementById('languageSelector').addEventListener('change', updateToggleLabel);
+            // Setup language selector change event
+            if (document.getElementById('languageSelector')) {
+                // Define updateToggleLabel function
+                function updateToggleLabel() {
+                    // Get the language from the selector
+                    const languageSelector = document.getElementById('languageSelector');
+                    const selectedLanguage = languageSelector ? languageSelector.value : 'en-US';
+                    
+                    // Get the toggle label element
+                    const toggleLabel = document.getElementById('translationToggleLabel');
+                    
+                    // Update the label text based on selected language
+                    if (toggleLabel) {
+                        toggleLabel.textContent = selectedLanguage === 'pt-BR' ? 'Tradução' : 'Translate';
+                    }
+                    
+                    console.log(`Toggle label updated for language: ${selectedLanguage}`);
+                }
+                
+                // Add event listener with the now defined function
+                document.getElementById('languageSelector').addEventListener('change', updateToggleLabel);
+                
+                // Also expose it globally in case it's needed elsewhere
+                window.updateToggleLabel = updateToggleLabel;
+            } else {
+                console.warn('Language selector not found');
+            }
         });
     </script>
 </body>

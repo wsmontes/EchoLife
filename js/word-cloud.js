@@ -82,8 +82,11 @@ class WordCloud {
             if (window.partialTranscript && window.tagExtractor && typeof window.updateRealtimeTags === 'function') {
                 window.updateRealtimeTags(window.partialTranscript);
             } else {
-                // Just do a refresh of current words as a fallback
-                this.updateWordCloud(Array.from(this.words.values()), true);
+                // If we can't do a proper update, at least update the health indicator
+                this.healthIndicator.style.backgroundColor = '#FFA500';
+                setTimeout(() => {
+                    this.healthIndicator.style.backgroundColor = 'gray';
+                }, 500);
             }
         }
     }
@@ -116,15 +119,25 @@ class WordCloud {
         if (placeholder) {
             placeholder.textContent = getTranslation('words_appear', this.language);
             console.log(`Word cloud placeholder updated to language: ${this.language}`);
+        } else {
+            // Create a placeholder if it doesn't exist
+            const newPlaceholder = document.createElement('div');
+            newPlaceholder.className = 'word-cloud-placeholder';
+            newPlaceholder.textContent = getTranslation('words_appear', this.language);
+            this.container.appendChild(newPlaceholder);
+            console.log(`Word cloud placeholder created with language: ${this.language}`);
         }
     }
     
     // Updates the word cloud with new tags
     async updateWordCloud(tags, isResizing = false) {
         if (!this.container) {
-            console.error("WordCloud: Container not found during updateWordCloud");
+            console.error("[WORD-CLOUD] Container not found during updateWordCloud");
             return;
         }
+        
+        console.log(`[WORD-CLOUD] Updating with ${tags.length} tags, isResizing: ${isResizing}`);
+        console.log(`[WORD-CLOUD] Tags received:`, tags);
         
         // Update last update time
         this.lastUpdateTime = Date.now();
@@ -143,13 +156,12 @@ class WordCloud {
             if (placeholder) {
                 placeholder.style.display = 'none';
                 this.placeholderRemoved = true;
-                console.log("WordCloud: Placeholder removed");
+                console.log("[WORD-CLOUD] Placeholder removed");
             }
         }
         
         // Track semantic themes for dynamic color assignment
-        // Log language for debugging
-        console.log(`Word cloud updating with language: ${this.language}, tags: ${tags.length}`);
+        console.log(`[WORD-CLOUD] Language: ${this.language}, tags: ${tags.length}`);
         const semanticThemes = this.identifyThemes(tags);
         
         // Create a new Map for tracking current update's words
@@ -159,6 +171,7 @@ class WordCloud {
         this.updateLanguageIndicator();
         
         // Process each tag
+        console.log(`[WORD-CLOUD] Processing ${tags.length} tags for display`);
         for (const tag of tags) {
             try {
                 // Extract tag data
@@ -167,7 +180,10 @@ class WordCloud {
                 const count = tag.count || 1;
                 
                 // Skip empty or very short tags
-                if (!text || text.length < 2) continue;
+                if (!text || text.length < 2) {
+                    console.log(`[WORD-CLOUD] Skipping empty/short tag: "${text}"`);
+                    continue;
+                }
                 
                 // Get the size class using the helper method or fallback
                 const sizeClass = this.getSizeClass ? 
@@ -177,6 +193,7 @@ class WordCloud {
                 // Check if this word already exists in the cloud
                 if (this.words.has(text)) {
                     // Update existing word
+                    console.log(`[WORD-CLOUD] Updating existing word: "${text}" (confidence: ${confidence}, size: ${sizeClass})`);
                     const word = this.words.get(text);
                     
                     // Update properties
@@ -195,7 +212,13 @@ class WordCloud {
                         
                         // Add status classes
                         if (tag.status) {
-                            word.element.classList.add(tag.status);
+                            if (tag.status === 'new') {
+                                word.element.classList.add('new');
+                                console.log(`[WORD-CLOUD] Word "${text}" marked as new`);
+                            } else if (tag.status === 'changing') {
+                                word.element.classList.add('changing');
+                                console.log(`[WORD-CLOUD] Word "${text}" marked as changing`);
+                            }
                         }
                         
                         // Apply theme color
@@ -212,6 +235,7 @@ class WordCloud {
                     
                 } else {
                     // Create new word element
+                    console.log(`[WORD-CLOUD] Adding new word: "${text}" (confidence: ${confidence}, size: ${sizeClass})`);
                     const wordElement = document.createElement('div');
                     
                     // Set text content
@@ -223,11 +247,13 @@ class WordCloud {
                     // Add status classes
                     if (tag.status) {
                         wordElement.classList.add(tag.status);
+                        console.log(`[WORD-CLOUD] Adding status class "${tag.status}" to "${text}"`);
                     }
                     
                     // Apply theme color
                     const themeColor = this.getThemeColor(text, semanticThemes);
                     wordElement.style.color = themeColor;
+                    console.log(`[WORD-CLOUD] Set color for "${text}" to ${themeColor}`);
                     
                     // Set initial positions (will be adjusted later)
                     wordElement.style.left = '50%';
@@ -251,70 +277,29 @@ class WordCloud {
                     this.container.appendChild(wordElement);
                 }
             } catch (error) {
-                console.error(`Error processing tag "${tag.text || tag}":`, error);
+                console.error(`[WORD-CLOUD] Error processing tag "${tag.text || tag}":`, error);
             }
         }
         
-        // If this is a resize operation, reposition all words but don't remove any
-        if (isResizing) {
-            console.log("WordCloud: Repositioning all words due to resize");
-            try {
-                for (const word of this.words.values()) {
-                    if (word.element) {
-                        const position = this.getOptimalPosition(word.element, this.getSizeClass(word.confidence, word.count));
-                        
-                        // Apply the position with animation
-                        word.element.style.transition = 'all 0.5s ease-out';
-                        word.element.style.left = `${position.left}px`;
-                        word.element.style.top = `${position.top}px`;
-                        word.element.style.transform = 'none';
-                    }
-                }
-            } catch (error) {
-                console.error("Error during resize repositioning:", error);
-            }
-            return;
-        }
-        
-        // Handle words that weren't in this update (fade them out)
-        for (const [text, word] of this.words.entries()) {
-            if (!currentUpdate.has(text)) {
-                // Word not in current update, fade it out
-                if (word.element) {
-                    word.element.classList.add('fade-out');
-                    
-                    // Remove after animation completes
-                    setTimeout(() => {
-                        try {
-                            if (word.element && word.element.parentNode) {
-                                word.element.parentNode.removeChild(word.element);
-                            }
-                            this.words.delete(text);
-                        } catch (error) {
-                            console.error(`Error removing word "${text}":`, error);
-                        }
-                    }, 500);
-                } else {
-                    // If no element, just remove it
-                    this.words.delete(text);
-                }
-            }
-        }
+        // Position new words
+        console.log(`[WORD-CLOUD] Positioning ${currentUpdate.size} words in cloud`);
         
         // Add any new words from current update
         for (const [text, word] of currentUpdate.entries()) {
             if (word.element && !word.positioned) {
                 try {
                     // Get the proper size class
-                    const sizeClass = this.getSizeClass(word.confidence, word.count);
+                    const sizeClass = this.getSizeClass ? 
+                        this.getSizeClass(word.confidence, word.count) : 
+                        this.getDefaultSizeClass(word.confidence, word.count);
                     
                     // Get the optimal position with error handling
                     let position;
                     try {
                         position = this.getOptimalPosition(word.element, sizeClass);
+                        console.log(`[WORD-CLOUD] Positioned "${text}" at x:${position.left}, y:${position.top}`);
                     } catch (posError) {
-                        console.warn(`Error getting position for word "${text}":`, posError);
-                        // Fallback position
+                        console.error(`[WORD-CLOUD] Error getting position for "${text}":`, posError);
                         position = {
                             left: Math.random() * (this.containerWidth - 100) + 50,
                             top: Math.random() * (this.containerHeight - 50) + 25
@@ -323,7 +308,7 @@ class WordCloud {
                     
                     // Check if position is valid before using it
                     if (!position || typeof position.left === 'undefined' || typeof position.top === 'undefined') {
-                        console.warn(`Invalid position for word "${text}". Using fallback.`);
+                        console.warn(`[WORD-CLOUD] Invalid position for word "${text}", using random position`);
                         position = {
                             left: Math.random() * (this.containerWidth - 100) + 50,
                             top: Math.random() * (this.containerHeight - 50) + 25
@@ -339,189 +324,125 @@ class WordCloud {
                     // Mark as positioned
                     word.positioned = true;
                 } catch (error) {
-                    console.error(`Error positioning word "${text}":`, error);
+                    console.error(`[WORD-CLOUD] Error positioning word "${text}":`, error);
                     
                     // Apply fallback positioning even after errors
                     try {
-                        word.element.style.left = `${Math.random() * (this.containerWidth - 100)}px`;
-                        word.element.style.top = `${Math.random() * (this.containerHeight - 50)}px`;
+                        word.element.style.left = `${Math.random() * (this.containerWidth - 100) + 50}px`;
+                        word.element.style.top = `${Math.random() * (this.containerHeight - 50) + 25}px`;
                         word.element.style.transform = 'none';
                         word.positioned = true;
+                        console.log(`[WORD-CLOUD] Applied fallback positioning for "${text}"`);
                     } catch (fallbackError) {
-                        console.error(`Critical error applying fallback position for "${text}":`, fallbackError);
+                        console.error(`[WORD-CLOUD] Even fallback positioning failed for "${text}":`, fallbackError);
                     }
                 }
             }
         }
+        
+        console.log(`[WORD-CLOUD] Update complete with ${this.words.size} total words in cloud`);
     }
     
-    // New method to identify semantic themes from the current set of tags
-    identifyThemes(tags) {
-        // Add Portuguese-specific theme detection
-        const isPortuguese = this.language === 'pt-BR';
-        console.log(`Identifying themes with language: ${this.language}, isPortuguese: ${isPortuguese}`);
+    // Find an optimal position for a word that minimizes overlaps
+    getOptimalPosition(element, sizeClass) {
+        const padding = 10;
+        let width, height;
         
-        // For Portuguese, consider groups based on Brazilian industries/topics
-        if (isPortuguese) {
-            // Define Portuguese theme keywords
-            const themeKeywords = {
-                'tecnologia': ['tecnologia', 'digital', 'app', 'aplicativo', 'software', 'computador', 'internet', 'rede', 'programação', 'código', 'inteligência artificial', 'ia', 'dados'],
-                'saúde': ['saúde', 'médico', 'hospital', 'medicina', 'enfermagem', 'tratamento', 'doença', 'bem-estar', 'fitness', 'exercício'],
-                'finanças': ['finanças', 'dinheiro', 'investimento', 'banco', 'economia', 'mercado', 'financeiro', 'bolsa', 'ações'],
-                'educação': ['educação', 'escola', 'universidade', 'ensino', 'aprendizagem', 'professor', 'aluno', 'estudo'],
-                'governo': ['governo', 'política', 'público', 'lei', 'legislação', 'presidente', 'ministro', 'congresso']
+        // Estimate dimensions based on sizeClass and text length
+        if (sizeClass === 'large' || sizeClass === 'x-large') {
+            width = element.textContent.length * 14;
+            height = 40;
+        } else if (sizeClass === 'medium') {
+            width = element.textContent.length * 10;
+            height = 30;
+        } else {
+            width = element.textContent.length * 8;
+            height = 20;
+        }
+        
+        // Safety margins to keep words within container
+        const safetyMargin = 20;
+        const maxWidth = Math.max(10, this.containerWidth - width - safetyMargin);
+        const maxHeight = Math.max(10, this.containerHeight - height - safetyMargin);
+        
+        // If collision detection is disabled or we have few words, use simple random positioning
+        if (!this.collisionDetection || this.words.size < 5) {
+            return {
+                left: Math.random() * maxWidth + safetyMargin / 2,
+                top: Math.random() * maxHeight + safetyMargin / 2
+            };
+        }
+        
+        // Try to find a position with minimal overlap
+        let bestPosition = null;
+        let lowestOverlap = Infinity;
+        const attempts = 15; // Number of positions to try
+        
+        for (let i = 0; i < attempts; i++) {
+            // Start with a random position
+            const position = {
+                left: Math.random() * maxWidth + safetyMargin / 2,
+                top: Math.random() * maxHeight + safetyMargin / 2
             };
             
-            // Apply Portuguese-specific grouping logic
-            const themes = [];
-            const processedWords = new Set();
-            
-            // Group words by theme
-            for (const tag of tags) {
-                const word = tag.text.toLowerCase();
-                if (processedWords.has(word)) continue;
-                
-                // Check each theme category
-                let foundTheme = false;
-                for (const [theme, keywords] of Object.entries(themeKeywords)) {
-                    if (keywords.some(keyword => word.includes(keyword.toLowerCase()))) {
-                        // Find other words in the same theme
-                        const relatedWords = tags
-                            .filter(t => !processedWords.has(t.text.toLowerCase()) && 
-                                keywords.some(k => t.text.toLowerCase().includes(k.toLowerCase())))
-                            .map(t => t.text.toLowerCase());
-                        
-                        if (relatedWords.length > 0) {
-                            themes.push({
-                                words: relatedWords,
-                                color: this.generateThemeColor(themes.length)
-                            });
-                            
-                            relatedWords.forEach(w => processedWords.add(w));
-                            foundTheme = true;
-                            break;
-                        }
-                    }
-                }
-                
-                // If not found in any theme, check for related words
-                if (!foundTheme) {
-                    const relatedWords = tags.filter(t => 
-                        this.areWordsRelated(word, t.text.toLowerCase()) && 
-                        !processedWords.has(t.text.toLowerCase())
-                    ).map(t => t.text.toLowerCase());
+            // Calculate total overlap with existing words
+            let totalOverlap = 0;
+            for (const [existingText, existingWord] of this.words.entries()) {
+                if (existingWord.element && existingWord.positioned && existingText !== element.textContent) {
+                    // Get existing element position and dimensions
+                    const existingRect = existingWord.element.getBoundingClientRect();
+                    const containerRect = this.container.getBoundingClientRect();
                     
-                    if (relatedWords.length > 0) {
-                        relatedWords.push(word);
-                        relatedWords.forEach(w => processedWords.add(w));
-                        
-                        themes.push({
-                            words: relatedWords,
-                            color: this.generateThemeColor(themes.length)
-                        });
-                    } else {
-                        // No theme or related words, add as individual
-                        processedWords.add(word);
-                        themes.push({
-                            words: [word],
-                            color: this.generateThemeColor(themes.length)
-                        });
-                    }
+                    // Adjust for container offset
+                    const existingLeft = existingRect.left - containerRect.left;
+                    const existingTop = existingRect.top - containerRect.top;
+                    const existingWidth = existingRect.width;
+                    const existingHeight = existingRect.height;
+                    
+                    // Calculate overlap
+                    const horizontalOverlap = Math.max(0, Math.min(position.left + width, existingLeft + existingWidth) - Math.max(position.left, existingLeft));
+                    const verticalOverlap = Math.max(0, Math.min(position.top + height, existingTop + existingHeight) - Math.max(position.top, existingTop));
+                    const overlap = horizontalOverlap * verticalOverlap;
+                    
+                    totalOverlap += overlap;
                 }
             }
             
-            return themes;
-        }
-        
-        // Original English theme detection
-        // Create thematic clusters based on word relationships
-        const themes = [];
-        const processedWords = new Set();
-        
-        // Extract themes based on similar words or patterns
-        for (const tag of tags) {
-            if (processedWords.has(tag.text.toLowerCase())) continue;
-            
-            const relatedWords = tags.filter(t => 
-                this.areWordsRelated(tag.text, t.text) && 
-                !processedWords.has(t.text.toLowerCase())
-            ).map(t => t.text.toLowerCase());
-            
-            if (relatedWords.length > 0) {
-                // Add the current word to its related words
-                relatedWords.push(tag.text.toLowerCase());
+            // Keep track of best position
+            if (totalOverlap < lowestOverlap) {
+                lowestOverlap = totalOverlap;
+                bestPosition = position;
                 
-                // Mark all these words as processed
-                relatedWords.forEach(word => processedWords.add(word));
-                
-                // Create a new theme with a unique color
-                themes.push({
-                    words: relatedWords,
-                    color: this.generateThemeColor(themes.length)
-                });
+                // If we found a position with no overlap, use it
+                if (totalOverlap === 0) break;
             }
         }
         
-        // Handle any remaining unprocessed words
-        const remainingTags = tags.filter(t => !processedWords.has(t.text.toLowerCase()));
-        if (remainingTags.length > 0) {
-            const groupSize = 3; // Group remaining words in small clusters
-            
-            for (let i = 0; i < remainingTags.length; i += groupSize) {
-                const group = remainingTags.slice(i, i + groupSize);
-                const groupWords = group.map(t => t.text.toLowerCase());
-                
-                themes.push({
-                    words: groupWords,
-                    color: this.generateThemeColor(themes.length)
-                });
-                
-                groupWords.forEach(word => processedWords.add(word));
-            }
+        // If we couldn't find a good position, use a random one
+        if (!bestPosition) {
+            bestPosition = {
+                left: Math.random() * maxWidth + safetyMargin / 2,
+                top: Math.random() * maxHeight + safetyMargin / 2
+            };
         }
         
-        return themes;
+        return bestPosition;
     }
     
-    // Check if two words are semantically related
-    areWordsRelated(word1, word2) {
-        if (word1.toLowerCase() === word2.toLowerCase()) return true;
+    // Helper method to generate a theme color for a word
+    getThemeColor(word, themes) {
+        word = word.toLowerCase();
         
-        // Simple stemming - check if one word starts with the other
-        const w1 = word1.toLowerCase();
-        const w2 = word2.toLowerCase();
-        
-        if (w1.startsWith(w2) || w2.startsWith(w1)) return true;
-        
-        // Check for common prefixes (at least 4 chars)
-        const minPrefixLength = 4;
-        const maxLength = Math.min(w1.length, w2.length);
-        
-        if (maxLength >= minPrefixLength) {
-            const commonPrefix = w1.substring(0, maxLength);
-            if (w2.startsWith(commonPrefix)) return true;
+        // Find which theme the word belongs to
+        for (let i = 0; i < themes.length; i++) {
+            const theme = themes[i];
+            if (theme.words.includes(word)) {
+                return this.generateThemeColor(theme.index);
+            }
         }
         
-        // Check for semantic relationships (could be expanded with NLP libraries)
-        const relationPatterns = [
-            // Same subject areas
-            ['health', 'doctor', 'medical', 'wellness', 'fitness', 'diet'],
-            ['tech', 'computer', 'software', 'programming', 'digital'],
-            ['finance', 'money', 'bank', 'investment', 'stock', 'market'],
-            ['travel', 'vacation', 'trip', 'tour', 'destination'],
-            ['food', 'cooking', 'recipe', 'meal', 'kitchen', 'dining'],
-            ['music', 'song', 'artist', 'band', 'concert'],
-            ['sport', 'game', 'team', 'player', 'competition'],
-            ['work', 'job', 'career', 'office', 'professional']
-        ];
-        
-        for (const pattern of relationPatterns) {
-            const w1Match = pattern.some(term => w1.includes(term));
-            const w2Match = pattern.some(term => w2.includes(term));
-            if (w1Match && w2Match) return true;
-        }
-        
-        return false;
+        // Default color if no theme is found
+        return '#757575'; // Gray
     }
     
     // Generate a visually pleasing color for a theme
@@ -552,10 +473,124 @@ class WordCloud {
         if (index < colorPalette.length) {
             return colorPalette[index];
         } else {
-            // Create a variation of an existing color
+            // Create variations by adjusting an existing color
             const baseColor = colorPalette[index % colorPalette.length];
             return this.adjustColor(baseColor, index);
         }
+    }
+    
+    // New method to identify semantic themes from the current set of tags
+    identifyThemes(tags) {
+        // Add Portuguese-specific theme detection
+        const isPortuguese = this.language === 'pt-BR';
+        console.log(`Identifying themes with language: ${this.language}, isPortuguese: ${isPortuguese}`);
+        
+        // For Portuguese, consider groups based on Brazilian industries/topics
+        if (isPortuguese) {
+            // Portuguese-specific theme detection will go here
+            // This is simplified for now
+        }
+        
+        // Original English theme detection
+        // Create thematic clusters based on word relationships
+        const themes = [];
+        const processedWords = new Set();
+        
+        // Extract themes based on similar words or patterns
+        for (const tag of tags) {
+            const word = tag.text.toLowerCase();
+            
+            // Skip already processed words
+            if (processedWords.has(word)) continue;
+            
+            // Check if this word is related to existing themes
+            let foundTheme = false;
+            for (const theme of themes) {
+                for (const themeWord of theme.words) {
+                    if (this.areWordsRelated(word, themeWord)) {
+                        theme.words.push(word);
+                        processedWords.add(word);
+                        foundTheme = true;
+                        break;
+                    }
+                }
+                if (foundTheme) break;
+            }
+            
+            // If not related to existing themes, create a new theme
+            if (!foundTheme) {
+                themes.push({
+                    index: themes.length,
+                    words: [word]
+                });
+                processedWords.add(word);
+            }
+        }
+        
+        // Handle any remaining unprocessed words
+        const remainingTags = tags.filter(t => !processedWords.has(t.text.toLowerCase()));
+        if (remainingTags.length > 0) {
+            // Add remaining words to existing themes or create new ones
+            for (const tag of remainingTags) {
+                const word = tag.text.toLowerCase();
+                if (!processedWords.has(word)) {
+                    // Just add as a new theme
+                    themes.push({
+                        index: themes.length,
+                        words: [word]
+                    });
+                    processedWords.add(word);
+                }
+            }
+        }
+        
+        return themes;
+    }
+    
+    // Check if two words are semantically related
+    areWordsRelated(word1, word2) {
+        if (word1.toLowerCase() === word2.toLowerCase()) {
+            return true;
+        }
+        
+        // Simple stemming - check if one word starts with the other
+        const w1 = word1.toLowerCase();
+        const w2 = word2.toLowerCase();
+        
+        if (w1.startsWith(w2) || w2.startsWith(w1)) {
+            return true;
+        }
+        
+        // Check for common prefixes (at least 4 chars)
+        const minPrefixLength = 4;
+        const maxLength = Math.min(w1.length, w2.length);
+        
+        if (maxLength >= minPrefixLength) {
+            const commonPrefix = w1.substring(0, maxLength);
+            if (w2.startsWith(commonPrefix)) {
+                return true;
+            }
+        }
+        
+        // Check for semantic relationships (could be expanded with NLP libraries)
+        const relationPatterns = [
+            ['health', 'doctor', 'medical', 'wellness', 'fitness', 'diet'],
+            ['tech', 'computer', 'software', 'programming', 'digital'],
+            ['finance', 'money', 'bank', 'investment', 'stock', 'market'],
+            ['travel', 'vacation', 'trip', 'tour', 'destination'],
+            ['food', 'cooking', 'recipe', 'meal', 'kitchen', 'dining'],
+            ['music', 'song', 'artist', 'band', 'concert'],
+            ['sport', 'game', 'team', 'player', 'competition'],
+            ['work', 'job', 'career', 'office', 'professional']
+        ];
+        
+        for (const pattern of relationPatterns) {
+            if (pattern.includes(w1) && pattern.includes(w2)) {
+                return true;
+            }
+        }
+        
+        return false;
     }
     
     // Adjust a color to create a variation
@@ -567,7 +602,7 @@ class WordCloud {
         
         // Adjust each component based on seed
         const adjust = (value, amount) => {
-            return Math.max(0, Math.min(255, value + amount));
+            return Math.min(255, Math.max(0, value + amount));
         };
         
         r = adjust(r, (seed * 13) % 60 - 30);
@@ -576,76 +611,6 @@ class WordCloud {
         
         // Convert back to hex
         return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-    }
-    
-    // Get the color for a word based on its theme
-    getThemeColor(word, themes) {
-        word = word.toLowerCase();
-        
-        // Find which theme the word belongs to
-        for (const theme of themes) {
-            if (theme.words.includes(word)) {
-                return theme.color;
-            }
-        }
-        
-        // Default color if no theme is found
-        return '#757575'; // Gray
-    }
-    
-    // Find an optimal position for a word that minimizes overlaps
-    getOptimalPosition(element, sizeClass) {
-        const padding = 10;
-        let width, height;
-        
-        // Estimate dimensions based on sizeClass and text length
-        if (sizeClass === 'large' || sizeClass === 'x-large') {
-            width = element.textContent.length * 18 + padding;
-            height = 45 + padding;
-        } else if (sizeClass === 'medium') {
-            width = element.textContent.length * 14 + padding;
-            height = 35 + padding;
-        } else {
-            width = element.textContent.length * 10 + padding;
-            height = 25 + padding;
-        }
-        
-        // Safety margins to keep words within container
-        const safetyMargin = 20;
-        const maxWidth = Math.max(10, this.containerWidth - width - safetyMargin);
-        const maxHeight = Math.max(10, this.containerHeight - height - safetyMargin);
-        
-        // If collision detection is disabled or we have few words, use simple random positioning
-        if (!this.collisionDetection || this.words.size < 5) {
-            return {
-                left: Math.random() * maxWidth + safetyMargin,
-                top: Math.random() * maxHeight + safetyMargin
-            };
-        }
-        
-        // Try to find a position with minimal overlap
-        let bestPosition = null;
-        const attempts = 15; // Number of positions to try
-        
-        for (let i = 0; i < attempts; i++) {
-            const left = Math.random() * maxWidth + safetyMargin;
-            const top = Math.random() * maxHeight + safetyMargin;
-            
-            // Use this position if it's the first attempt
-            if (bestPosition === null) {
-                bestPosition = { left, top };
-            }
-        }
-        
-        // If we couldn't find a good position, use a random one
-        if (!bestPosition) {
-            bestPosition = {
-                left: Math.random() * maxWidth + safetyMargin,
-                top: Math.random() * maxHeight + safetyMargin
-            };
-        }
-        
-        return bestPosition;
     }
     
     updateLanguageIndicator() {
@@ -665,11 +630,9 @@ class WordCloud {
         indicator.className = 'word-cloud-language-indicator';
         
         if (translationSettings.translateEnabled) {
-            const sourceLang = translationSettings.language === 'pt-BR' ? 'PT' : 'EN';
-            const targetLang = translationSettings.language === 'pt-BR' ? 'EN' : 'PT';
-            indicator.textContent = `${sourceLang} → ${targetLang}`;
+            indicator.textContent = translationSettings.language === 'pt-BR' ? '🇧🇷 (Tradução)' : '🇺🇸 (Translation)';
         } else {
-            indicator.textContent = translationSettings.language === 'pt-BR' ? 'Português' : 'English';
+            indicator.textContent = translationSettings.language === 'pt-BR' ? '🇧🇷' : '🇺🇸';
         }
         
         this.container.appendChild(indicator);
@@ -687,9 +650,13 @@ class WordCloud {
         
         // Adjust for count if needed
         if (count > 2) {
-            return 'x-large';
-        } else if (count > 1.5) {
-            return 'large';
+            // Upgrade size class for frequently occurring terms
+            if (baseSize === 'small') baseSize = 'medium';
+            else if (baseSize === 'medium') baseSize = 'large';
+            else if (baseSize === 'large') baseSize = 'x-large';
+        } else if (count >= 1.5) {
+            // Slight upgrade for terms that occur more than once
+            if (baseSize === 'small') baseSize = 'medium';
         }
         
         return baseSize;
@@ -705,5 +672,7 @@ class WordCloud {
         }
         return 'small';
     }
-
 }
+
+// Create and export a global instance
+window.WordCloud = WordCloud;
