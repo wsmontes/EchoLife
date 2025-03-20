@@ -4,35 +4,31 @@
     width: 100%;
     height: 300px;
     background-color: #f8f9fa;
-    border-radius: 8px;
-    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    margin: 20px 0;
     overflow: hidden;
-    margin-bottom: 20px;
-    box-shadow: inset 0 0 10px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+    border: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 .fullscreen-toggle {
     position: absolute;
-    top: 10px;
+    bottom: 10px;
     right: 10px;
-    z-index: 10;
-    background-color: rgba(255, 255, 255, 0.7);
+    background: rgba(0, 0, 0, 0.1);
     border: none;
-    border-radius: 4px;
+    border-radius: 50%;
     width: 30px;
     height: 30px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.2s ease;
-    color: #495057;
-    font-size: 14px;
+    z-index: 2;
 }
 
 .fullscreen-toggle:hover {
-    background-color: rgba(255, 255, 255, 0.9);
-    transform: scale(1.1);
+    background: rgba(0, 0, 0, 0.2);
 }
 
 .word-cloud-container.fullscreen {
@@ -41,29 +37,29 @@
     left: 0;
     width: 100vw;
     height: 100vh;
-    z-index: 9999;
+    z-index: 1000;
+    margin: 0;
     border-radius: 0;
-    background-color: rgba(248, 249, 250, 0.98);
+    background-color: rgba(255, 255, 255, 0.95);
 }
 
 .word {
     position: absolute;
-    display: inline-block;
     padding: 3px 8px;
     border-radius: 15px;
-    color: white;
-    font-weight: 500;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    background-color: rgba(255, 255, 255, 0.8);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     user-select: none;
-    cursor: pointer;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    opacity: 0;
-    transform: scale(0);
-    transition: 
-        transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275), 
-        opacity 0.5s ease,
-        background-color 0.3s ease;
-    will-change: transform, opacity, left, top;
+    cursor: default;
+    transition: transform 0.2s ease, opacity 0.5s ease;
+    opacity: 0.9;
+    animation: fadeIn 0.5s ease-out forwards;
+}
+
+.word:hover {
+    transform: scale(1.1);
+    opacity: 1;
+    z-index: 5;
 }
 
 .word.visible {
@@ -142,10 +138,10 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    color: #adb5bd;
-    font-size: 1.1rem;
+    color: #aaa;
+    font-style: italic;
     text-align: center;
-    width: 80%;
+    pointer-events: none;
 }
 
 .word-cloud-health-indicator {
@@ -218,4 +214,96 @@
     height: 12px;
     border-radius: 50%;
     margin-right: 5px;
+}
+
+/* Word sizes */
+.word.small {
+    font-size: 12px;
+}
+
+.word.medium {
+    font-size: 16px;
+}
+
+.word.large {
+    font-size: 22px;
+    font-weight: 500;
+}
+
+.word.x-large {
+    font-size: 28px;
+    font-weight: 600;
+}
+
+/* Confidence levels */
+.word.high-confidence {
+    font-weight: bold;
+}
+
+.word.low-confidence {
+    font-style: italic;
+    opacity: 0.7;
+}
+
+/* Special states */
+.word.uncertain {
+    font-style: italic;
+    border: 1px dashed rgba(0, 0, 0, 0.2);
+}
+
+.word.new {
+    animation: fadeInPulse 0.8s ease-out forwards;
+}
+
+.word.fade-out {
+    opacity: 0;
+    transform: scale(0.8);
+}
+
+.word.update-pulse {
+    animation: pulse 0.8s ease-out;
+}
+
+/* Word Cloud health indicator */
+.health-indicator {
+    position: absolute;
+    bottom: 5px;
+    right: 5px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: gray;
+    transition: background-color 0.5s;
+    opacity: 0.5;
+}
+
+/* Language indicator */
+.language-indicator {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    font-size: 12px;
+    color: #888;
+    background-color: rgba(255, 255, 255, 0.7);
+    padding: 3px 8px;
+    border-radius: 10px;
+    z-index: 2;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.8); }
+    to { opacity: 0.9; transform: scale(1); }
+}
+
+@keyframes fadeInPulse {
+    0% { opacity: 0; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.1); }
+    100% { opacity: 0.9; transform: scale(1); }
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
 }

@@ -2,8 +2,13 @@ class WordCloud {
     constructor(containerId) {
         this.container = document.getElementById(containerId);
         if (!this.container) {
-            console.error(`Container with ID ${containerId} not found`);
-            return;
+            console.error(`WordCloud: Container with ID "${containerId}" not found!`);
+            // Create a fallback container if not found
+            this.container = document.createElement('div');
+            this.container.id = containerId;
+            this.container.className = 'word-cloud-container';
+            document.body.appendChild(this.container);
+            console.log(`WordCloud: Created fallback container with ID "${containerId}"`);
         }
         
         this.words = new Map(); // Store word objects with their properties
@@ -44,6 +49,8 @@ class WordCloud {
         
         // Setup heartbeat to ensure the cloud stays responsive
         this.heartbeatInterval = setInterval(() => this.checkHealth(), 5000);
+        
+        console.log(`WordCloud: Fully initialized with container size ${this.containerWidth}x${this.containerHeight}`);
     }
     
     setupHealthIndicator() {
@@ -114,7 +121,10 @@ class WordCloud {
     
     // Updates the word cloud with new tags
     async updateWordCloud(tags, isResizing = false) {
-        if (!this.container) return;
+        if (!this.container) {
+            console.error("WordCloud: Container not found during updateWordCloud");
+            return;
+        }
         
         // Update last update time
         this.lastUpdateTime = Date.now();
@@ -133,6 +143,7 @@ class WordCloud {
             if (placeholder) {
                 placeholder.style.display = 'none';
                 this.placeholderRemoved = true;
+                console.log("WordCloud: Placeholder removed");
             }
         }
         
@@ -149,166 +160,197 @@ class WordCloud {
         
         // Process each tag
         for (const tag of tags) {
-            const text = tag.text.toLowerCase();
-            // Determine font size based on count (relevance)
-            let fontSize = 14 + (tag.count * 2); // base 14px + 2px per count
-            
-            // Determine confidence class for fallback if needed
-            let sizeClass = 'word-medium';
-            if (tag.confidence === 'high') sizeClass = 'word-high';
-            else if (tag.confidence === 'low') sizeClass = 'word-low';
-            
-            // Get dynamic color based on semantic themes
-            const themeColor = this.getThemeColor(text, semanticThemes);
-            
-            // Build CSS classes including uncertain status if needed
-            let cssClasses = 'word visible';
-            if (tag.status === 'uncertain' || tag.uncertain || text.endsWith('?')) {
-                cssClasses += ' uncertain';
-            }
-            if (tag.translated) {
-                cssClasses += ' translated';
+            try {
+                // Extract tag data
+                const text = tag.text || tag;
+                const confidence = tag.confidence || 'medium';
+                const count = tag.count || 1;
                 
-                // Add specific translation direction if available
-                if (tag.translatedTo === 'en-US') {
-                    cssClasses += ' translated-to-en';
-                } else if (tag.translatedTo === 'pt-BR') {
-                    cssClasses += ' translated-to-pt';
-                }
-            }
-            
-            currentUpdate.set(text, {
-                id: `word-${text.replace(/\s+/g, '-').replace(/\?/g, '')}`,
-                text,
-                fontSize,
-                groupColor: themeColor,
-                confidence: tag.confidence,
-                cssClasses: cssClasses,
-                count: tag.count,
-                uncertain: tag.status === 'uncertain' || tag.uncertain || text.endsWith('?'),
-                lastSeen: Date.now()
-            });
-            
-            // Check if this word already exists
-            if (this.words.has(text)) {
-                // Update existing word
-                const existingWord = this.words.get(text);
-                const wordElement = document.getElementById(existingWord.id);
+                // Skip empty or very short tags
+                if (!text || text.length < 2) continue;
                 
-                if (wordElement) {
-                    // Apply smooth transition for size and color updates
-                    wordElement.style.transition = 'all 1s ease-out';
-                    wordElement.style.fontSize = `${fontSize}px`;
-                    wordElement.style.backgroundColor = themeColor;
+                // Get the size class using the helper method or fallback
+                const sizeClass = this.getSizeClass ? 
+                    this.getSizeClass(confidence, count) : 
+                    this.getDefaultSizeClass(confidence, count);
+                
+                // Check if this word already exists in the cloud
+                if (this.words.has(text)) {
+                    // Update existing word
+                    const word = this.words.get(text);
                     
-                    // Update classes for uncertainty
-                    if (tag.status === 'uncertain' || tag.uncertain || text.endsWith('?')) {
-                        wordElement.classList.add('uncertain');
-                    } else {
-                        wordElement.classList.remove('uncertain');
+                    // Update properties
+                    word.confidence = confidence;
+                    word.lastUpdated = Date.now();
+                    
+                    // Update count if provided
+                    if (tag.count !== undefined) {
+                        word.count = count;
                     }
                     
-                    existingWord.lastSeen = Date.now();
-                    // Update the stored color and uncertainty
-                    existingWord.groupColor = themeColor;
-                    existingWord.uncertain = tag.status === 'uncertain' || tag.uncertain || text.endsWith('?');
+                    // Update element if it exists
+                    if (word.element) {
+                        // Update element classes
+                        word.element.className = `word ${sizeClass} ${confidence}-confidence`;
+                        
+                        // Add status classes
+                        if (tag.status) {
+                            word.element.classList.add(tag.status);
+                        }
+                        
+                        // Apply theme color
+                        const themeColor = this.getThemeColor(text, semanticThemes);
+                        word.element.style.color = themeColor;
+                        
+                        // Add pulse effect for visual feedback
+                        word.element.classList.add('update-pulse');
+                        setTimeout(() => word.element.classList.remove('update-pulse'), 1000);
+                    }
+                    
+                    // Add to current update
+                    currentUpdate.set(text, word);
+                    
+                } else {
+                    // Create new word element
+                    const wordElement = document.createElement('div');
+                    
+                    // Set text content
+                    wordElement.textContent = text;
+                    
+                    // Set class based on size and confidence
+                    wordElement.className = `word ${sizeClass} ${confidence}-confidence`;
+                    
+                    // Add status classes
+                    if (tag.status) {
+                        wordElement.classList.add(tag.status);
+                    }
+                    
+                    // Apply theme color
+                    const themeColor = this.getThemeColor(text, semanticThemes);
+                    wordElement.style.color = themeColor;
+                    
+                    // Set initial positions (will be adjusted later)
+                    wordElement.style.left = '50%';
+                    wordElement.style.top = '50%';
+                    wordElement.style.transform = 'translate(-50%, -50%)';
+                    
+                    // Create word object
+                    const wordObj = {
+                        text,
+                        element: wordElement,
+                        confidence,
+                        count: count || 1,
+                        lastUpdated: Date.now()
+                    };
+                    
+                    // Add to maps
+                    this.words.set(text, wordObj);
+                    currentUpdate.set(text, wordObj);
+                    
+                    // Add to container with animation
+                    this.container.appendChild(wordElement);
                 }
-            } else {
-                // Create new word element
-                const wordElement = document.createElement('div');
-                const wordId = `word-${text.replace(/\s+/g, '-').replace(/\?/g, '')}`;
-                wordElement.id = wordId;
-                wordElement.className = cssClasses;
-                wordElement.textContent = text;
-                wordElement.style.fontSize = `${fontSize}px`;
-                wordElement.style.backgroundColor = themeColor;
-                
-                // Position the word randomly initially
-                const position = this.getOptimalPosition(wordElement, sizeClass);
-                wordElement.style.left = `${position.x}px`;
-                wordElement.style.top = `${position.y}px`;
-                
-                // Set smooth transition for entering
-                wordElement.style.transition = 'all 1s ease-out';
-                
-                // Random slight rotation for visual interest
-                const rotation = Math.random() * 10 - 5; // -5 to +5 degrees
-                wordElement.style.transform = `rotate(${rotation}deg) scale(0)`;
-                
-                // Add to container
-                this.container.appendChild(wordElement);
-                
-                // Make visible with delay for staggered appearance
-                setTimeout(() => {
-                    wordElement.style.transform = `rotate(${rotation}deg) scale(1)`;
-                }, 100 * this.words.size);
-                
-                // Add to words map
-                this.words.set(text, {
-                    id: wordId,
-                    text,
-                    fontSize,
-                    groupColor: themeColor,
-                    confidence: tag.confidence,
-                    count: tag.count,
-                    uncertain: tag.status === 'uncertain' || tag.uncertain || text.endsWith('?'),
-                    lastSeen: Date.now(),
-                    position
-                });
+            } catch (error) {
+                console.error(`Error processing tag "${tag.text || tag}":`, error);
             }
         }
         
         // If this is a resize operation, reposition all words but don't remove any
         if (isResizing) {
-            this.words.forEach((word) => {
-                const wordElement = document.getElementById(word.id);
-                if (wordElement) {
-                    const position = this.getOptimalPosition(wordElement, 'word-medium');
-                    
-                    // Animate to new position
-                    wordElement.style.transition = 'left 0.8s ease, top 0.8s ease';
-                    wordElement.style.left = `${position.x}px`;
-                    wordElement.style.top = `${position.y}px`;
-                    
-                    // Update stored position
-                    word.position = position;
+            console.log("WordCloud: Repositioning all words due to resize");
+            try {
+                for (const word of this.words.values()) {
+                    if (word.element) {
+                        const position = this.getOptimalPosition(word.element, this.getSizeClass(word.confidence, word.count));
+                        
+                        // Apply the position with animation
+                        word.element.style.transition = 'all 0.5s ease-out';
+                        word.element.style.left = `${position.left}px`;
+                        word.element.style.top = `${position.top}px`;
+                        word.element.style.transform = 'none';
+                    }
                 }
-            });
+            } catch (error) {
+                console.error("Error during resize repositioning:", error);
+            }
             return;
         }
         
         // Handle words that weren't in this update (fade them out)
         for (const [text, word] of this.words.entries()) {
             if (!currentUpdate.has(text)) {
-                const timeSinceLastSeen = Date.now() - word.lastSeen;
-                
-                // If word hasn't been seen in a while, remove it
-                if (timeSinceLastSeen > 2000) {  // use 2s for smoother fade-out
-                    const wordElement = document.getElementById(word.id);
-                    if (wordElement) {
-                        // Fade out animation
-                        wordElement.style.transition = 'all 0.8s ease-out';
-                        wordElement.style.opacity = '0';
-                        wordElement.style.transform = 'scale(0)';
-                        
-                        // Remove from DOM after animation
-                        setTimeout(() => {
-                            if (wordElement.parentNode) {
-                                wordElement.parentNode.removeChild(wordElement);
+                // Word not in current update, fade it out
+                if (word.element) {
+                    word.element.classList.add('fade-out');
+                    
+                    // Remove after animation completes
+                    setTimeout(() => {
+                        try {
+                            if (word.element && word.element.parentNode) {
+                                word.element.parentNode.removeChild(word.element);
                             }
-                        }, 800);
-                        
-                        // Remove from tracking
-                        this.words.delete(text);
-                    }
+                            this.words.delete(text);
+                        } catch (error) {
+                            console.error(`Error removing word "${text}":`, error);
+                        }
+                    }, 500);
+                } else {
+                    // If no element, just remove it
+                    this.words.delete(text);
                 }
             }
         }
         
         // Add any new words from current update
         for (const [text, word] of currentUpdate.entries()) {
-            if (!this.words.has(text)) {
-                this.words.set(text, word);
+            if (word.element && !word.positioned) {
+                try {
+                    // Get the proper size class
+                    const sizeClass = this.getSizeClass(word.confidence, word.count);
+                    
+                    // Get the optimal position with error handling
+                    let position;
+                    try {
+                        position = this.getOptimalPosition(word.element, sizeClass);
+                    } catch (posError) {
+                        console.warn(`Error getting position for word "${text}":`, posError);
+                        // Fallback position
+                        position = {
+                            left: Math.random() * (this.containerWidth - 100) + 50,
+                            top: Math.random() * (this.containerHeight - 50) + 25
+                        };
+                    }
+                    
+                    // Check if position is valid before using it
+                    if (!position || typeof position.left === 'undefined' || typeof position.top === 'undefined') {
+                        console.warn(`Invalid position for word "${text}". Using fallback.`);
+                        position = {
+                            left: Math.random() * (this.containerWidth - 100) + 50,
+                            top: Math.random() * (this.containerHeight - 50) + 25
+                        };
+                    }
+                    
+                    // Apply the position with animation
+                    word.element.style.transition = 'all 0.5s ease-out';
+                    word.element.style.left = `${position.left}px`;
+                    word.element.style.top = `${position.top}px`;
+                    word.element.style.transform = 'none';
+                    
+                    // Mark as positioned
+                    word.positioned = true;
+                } catch (error) {
+                    console.error(`Error positioning word "${text}":`, error);
+                    
+                    // Apply fallback positioning even after errors
+                    try {
+                        word.element.style.left = `${Math.random() * (this.containerWidth - 100)}px`;
+                        word.element.style.top = `${Math.random() * (this.containerHeight - 50)}px`;
+                        word.element.style.transform = 'none';
+                        word.positioned = true;
+                    } catch (fallbackError) {
+                        console.error(`Critical error applying fallback position for "${text}":`, fallbackError);
+                    }
+                }
             }
         }
     }
@@ -557,10 +599,10 @@ class WordCloud {
         let width, height;
         
         // Estimate dimensions based on sizeClass and text length
-        if (sizeClass === 'word-high') {
+        if (sizeClass === 'large' || sizeClass === 'x-large') {
             width = element.textContent.length * 18 + padding;
             height = 45 + padding;
-        } else if (sizeClass === 'word-medium') {
+        } else if (sizeClass === 'medium') {
             width = element.textContent.length * 14 + padding;
             height = 35 + padding;
         } else {
@@ -570,45 +612,40 @@ class WordCloud {
         
         // Safety margins to keep words within container
         const safetyMargin = 20;
-        const maxX = this.containerWidth - width - safetyMargin;
-        const maxY = this.containerHeight - height - safetyMargin;
+        const maxWidth = Math.max(10, this.containerWidth - width - safetyMargin);
+        const maxHeight = Math.max(10, this.containerHeight - height - safetyMargin);
         
-        // If collision detection is disabled or we have few words, just return random position
+        // If collision detection is disabled or we have few words, use simple random positioning
         if (!this.collisionDetection || this.words.size < 5) {
             return {
-                x: Math.random() * maxX + safetyMargin,
-                y: Math.random() * maxY + safetyMargin
+                left: Math.random() * maxWidth + safetyMargin,
+                top: Math.random() * maxHeight + safetyMargin
             };
         }
         
         // Try to find a position with minimal overlap
         let bestPosition = null;
-        let minOverlap = Infinity;
-        const attempts = 20; // Number of positions to try
+        const attempts = 15; // Number of positions to try
         
         for (let i = 0; i < attempts; i++) {
-            const x = Math.random() * maxX + safetyMargin;
-            const y = Math.random() * maxY + safetyMargin;
-            const rect = {x, y, width, height};
+            const left = Math.random() * maxWidth + safetyMargin;
+            const top = Math.random() * maxHeight + safetyMargin;
             
-            // Calculate total overlap with existing words
-            let totalOverlap = 0;
-            for (const word of this.words.values()) {
-                const wordElement = document.getElementById(word.id);
-                if (!wordElement) continue;
-                
-                const wordRect = {
-                    x: parseFloat(wordElement.style.left),
-                    y: parseFloat(wordElement.style.top),
-                    width: wordElement.offsetWidth,
-                    height: wordElement.offsetHeight
-                };
-                
-                if (this.isOverlapping(rect, wordRect)) {
-                    totalOverlap += this.calculateOverlap(rect, wordRect);
-                }
+            // Use this position if it's the first attempt
+            if (bestPosition === null) {
+                bestPosition = { left, top };
             }
         }
+        
+        // If we couldn't find a good position, use a random one
+        if (!bestPosition) {
+            bestPosition = {
+                left: Math.random() * maxWidth + safetyMargin,
+                top: Math.random() * maxHeight + safetyMargin
+            };
+        }
+        
+        return bestPosition;
     }
     
     updateLanguageIndicator() {
@@ -637,4 +674,36 @@ class WordCloud {
         
         this.container.appendChild(indicator);
     }
+    
+    // Helper method to get size class based on confidence and count
+    getSizeClass(confidence, count = 1) {
+        // Base size on confidence
+        let baseSize = 'small';
+        if (confidence === 'high') {
+            baseSize = 'large';
+        } else if (confidence === 'medium') {
+            baseSize = 'medium';
+        }
+        
+        // Adjust for count if needed
+        if (count > 2) {
+            return 'x-large';
+        } else if (count > 1.5) {
+            return 'large';
+        }
+        
+        return baseSize;
+    }
+    
+    // Fallback method for getting size class
+    getDefaultSizeClass(confidence, count = 1) {
+        // Simplified version as a fallback
+        if (confidence === 'high' || count > 1.5) {
+            return 'large';
+        } else if (confidence === 'medium') {
+            return 'medium';
+        }
+        return 'small';
+    }
+
 }

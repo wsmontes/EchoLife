@@ -332,6 +332,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.wordCloud.updateWordCloud([
                         {text: placeholderText, confidence: 'low', count: 1, group: "other"}
                     ]);
+                } else {
+                    console.error("Word cloud not initialized or not found!");
+                    // Try to initialize word cloud if it doesn't exist
+                    if (document.getElementById('wordCloudContainer')) {
+                        console.log("Trying to re-initialize word cloud");
+                        window.wordCloud = new WordCloud('wordCloudContainer');
+                    }
                 }
                 return;
             }
@@ -357,9 +364,18 @@ document.addEventListener('DOMContentLoaded', () => {
             
             console.log(`Updating word cloud with tags: ${tags.length}, language: ${language}`);
             
-            // Update word cloud with tags
+            // Update word cloud with tags - add extra check for wordCloud
             if (window.wordCloud) {
+                console.log(`Updating word cloud with ${tags.length} tags, language: ${language}`);
                 window.wordCloud.updateWordCloud(tags);
+            } else {
+                console.error("Word cloud not available for tag update!");
+                // Try to initialize word cloud if it doesn't exist
+                if (document.getElementById('wordCloudContainer')) {
+                    console.log("Trying to re-initialize word cloud");
+                    window.wordCloud = new WordCloud('wordCloudContainer');
+                    window.wordCloud.updateWordCloud(tags);
+                }
             }
             
             // Enable feedback button if we have speech
