@@ -10,7 +10,10 @@ class AudioRecorder {
         this.iosVersion = this.getIOSVersion();
         this.isIOSProblem = this.isIOS && (this.iosVersion >= 17); // iOS 17+ has specific audio issues
         
-        console.log(`Device detection: iOS: ${this.isIOS}, version: ${this.iosVersion || 'unknown'}, problem device: ${this.isIOSProblem}`);
+        // Flag to indicate if browser transcription might be more reliable than Whisper
+        this.preferBrowserTranscription = this.isIOS && (this.iosVersion >= 16);
+        
+        console.log(`Device detection: iOS: ${this.isIOS}, version: ${this.iosVersion || 'unknown'}, problem device: ${this.isIOSProblem}, prefer browser transcription: ${this.preferBrowserTranscription}`);
         
         // Set recording interval for iOS (ms) - shorter for iOS to avoid buffer issues
         this.recordingInterval = this.isIOS ? 1000 : 3000;
@@ -325,6 +328,13 @@ class AudioRecorder {
             preferredFormatForWhisper: preferredFormatForWhisper,
             likelyCompatible: isLikelyWhisperCompatible
         };
+    }
+    
+    // New method to check if browser transcription should be preferred
+    shouldPreferBrowserTranscription() {
+        // For iOS devices with known audio format problems with Whisper,
+        // return true to encourage using browser SpeechRecognition
+        return this.preferBrowserTranscription;
     }
     
     stopMediaTracks() {

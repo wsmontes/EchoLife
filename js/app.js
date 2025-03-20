@@ -426,9 +426,30 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.log(`Processing audio recording: ${audioResult.blob.size} bytes, type: ${audioResult.blob.type}, chunks: ${audioResult.chunks || 1}`);
                     recordingStatus.textContent = 'Transcribing audio...';
                     
-                    // Get the transcript - pass full audioResult object with metadata
-                    currentTranscript = await transcriptionService.transcribeAudio(audioResult);
-                    console.log("Transcription result:", currentTranscript ? "Success" : "Empty");
+                    // Save the browser's real-time transcription as a fallback
+                    const browserTranscription = partialTranscript.trim();
+                    let transcriptionSource = "whisper"; // Track which system provided the transcription
+                    
+                    try {
+                        // Try to use Whisper API first
+                        currentTranscript = await transcriptionService.transcribeAudio(audioResult);
+                        console.log("Whisper transcription result:", currentTranscript ? "Success" : "Empty");
+                    } catch (whisperError) {
+                        console.error('Whisper transcription failed:', whisperError);
+                        
+                        // If we're on iOS and we have browser transcription, use it as fallback
+                        if (audioRecorder.isIOS && browserTranscription && browserTranscription.length > 10) {
+                            console.log('Using browser SpeechRecognition as fallback on iOS');
+                            currentTranscript = browserTranscription;
+                            transcriptionSource = "browser";
+                            
+                            // Show a note that we're using the browser transcription
+                            alert("Using your device's built-in speech recognition as a fallback. This may be less accurate than our cloud service, but should work for simple recordings.");
+                        } else {
+                            // If no fallback is available, rethrow the error
+                            throw whisperError;
+                        }
+                    }
                     
                     // Extract tags from the full transcript
                     const tags = await tagExtractor.extractTags(currentTranscript, 8, true);
@@ -464,7 +485,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     lastAudioResult = audioResult;
                     
                     // Get subtitle data from the transcription service, which now uses Whisper's timestamps
-                    const whisperSubtitles = transcriptionService.getSubtitleData();
+                    // Only available if we used Whisper API, otherwise generate timestamps
+                    let whisperSubtitles = null;
+                    if (transcriptionSource === "whisper") {
+                        whisperSubtitles = transcriptionService.getSubtitleData();
+                    }
+                    
                     if (whisperSubtitles && whisperSubtitles.length > 0) {
                         // Use Whisper's native timestamp data if available
                         subtitlesData = whisperSubtitles;
