@@ -1571,4 +1571,40 @@ window.addEventListener('translationSettingsChanged', (e) => {
         console.log(`Word cloud language updated to: ${settings.language}`);
     }
 });
+
+// Setup foldable sections
+setupFoldableSections();
+
+// Function to set up foldable sections
+function setupFoldableSections() {
+    document.querySelectorAll('.foldable-section').forEach(section => {
+        const header = section.querySelector('.section-header');
+        const toggleButton = section.querySelector('.toggle-button');
+        
+        if (header) {
+            header.addEventListener('click', () => {
+                section.classList.toggle('collapsed');
+                updateAriaAttributes(section);
+            });
+        }
+        
+        // Initialize aria attributes
+        updateAriaAttributes(section);
+    });
+}
+
+// Helper function to update accessibility attributes
+function updateAriaAttributes(section) {
+    const isCollapsed = section.classList.contains('collapsed');
+    const toggleButton = section.querySelector('.toggle-button');
+    const sectionContent = section.querySelector('.section-content');
+    
+    if (toggleButton) {
+        toggleButton.setAttribute('aria-expanded', !isCollapsed);
+    }
+    
+    if (sectionContent) {
+        sectionContent.setAttribute('aria-hidden', isCollapsed);
+    }
+}
 });

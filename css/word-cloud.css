@@ -1,14 +1,15 @@
-/* Word Cloud Visualization */
+/* Word Cloud Container */
 .word-cloud-container {
     position: relative;
     width: 100%;
     height: 300px;
     background-color: #f8f9fa;
     border-radius: 10px;
-    margin: 20px 0;
+    margin: 0;
     overflow: hidden;
     transition: all 0.3s ease;
     border: 1px solid rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
 }
 
 .fullscreen-toggle {
@@ -306,4 +307,55 @@
     0% { transform: scale(1); }
     50% { transform: scale(1.1); }
     100% { transform: scale(1); }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .word {
+        font-size: 90%;  /* Slightly reduce all font sizes */
+    }
+    
+    .word.small {
+        font-size: 11px;
+    }
+
+    .word.medium {
+        font-size: 14px;
+    }
+
+    .word.large {
+        font-size: 18px;
+    }
+
+    .word.x-large {
+        font-size: 22px;
+    }
+}
+
+@media (max-width: 480px) {
+    .word {
+        font-size: 85%;  /* Further reduce font sizes */
+        padding: 2px 6px;
+    }
+    
+    .word.small {
+        font-size: 10px;
+    }
+
+    .word.medium {
+        font-size: 12px;
+    }
+
+    .word.large {
+        font-size: 16px;
+    }
+
+    .word.x-large {
+        font-size: 20px;
+    }
+    
+    .fullscreen-toggle {
+        width: 25px;
+        height: 25px;
+    }
 }

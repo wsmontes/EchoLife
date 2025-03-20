@@ -36,14 +36,40 @@ body {
     padding: 2rem;
 }
 
+/* Header and Top Elements Styling */
 header {
-    text-align: center;
-    margin-bottom: 2rem;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 15px;
+    margin-bottom: 20px;
+    background: linear-gradient(to right, #f8f9fa, #e9ecef);
+    border-radius: 10px;
+    box-shadow: 0 2px 15px rgba(0, 0, 0, 0.05);
 }
 
 header h1 {
+    margin: 0 0 5px 0;
+    font-size: 2.5rem;
     color: var(--primary-color);
-    margin-bottom: 0.5rem;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+header p {
+    margin: 0 0 15px 0;
+    color: var(--text-color);
+    font-size: 1.1rem;
+}
+
+.top-controls-container {
+    display: flex;
+    width: 100%;
+    justify-content: space-between; /* Changed from flex-end to space-between */
+    align-items: center;
+    margin-top: 15px;
+    gap: 20px; /* Increased gap for better spacing */
+    flex-wrap: nowrap; /* Prevent wrapping by default */
 }
 
 section {
@@ -637,42 +663,12 @@ footer {
 
 /* Language Controls Styling */
 .language-controls {
-    position: absolute;
-    top: 10px;
-    right: 120px; /* Position to the left of the API key button */
     display: flex;
     align-items: center;
     gap: 15px;
-    z-index: 10;
-}
-
-.language-selector-container {
-    /* Remove absolute positioning */
-    position: relative;
-    top: auto;
-    right: auto;
-}
-
-.language-selector {
-    padding: 6px 10px;
-    border: none;
-    background: var(--secondary-color);
-    color: white;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    appearance: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3e%3cpath d='M7 10l5 5 5-5z'/%3e%3c/svg%3e");
-    background-repeat: no-repeat;
-    background-position: right 8px center;
-    background-size: 16px;
-    padding-right: 28px;
-}
-
-.language-selector:hover {
-    background-color: #6eadb9;
+    margin-bottom: 0;
+    margin-right: auto; /* Push to the left edge */
+    position: static;
 }
 
 /* Translation Toggle Styling */
@@ -741,6 +737,7 @@ input:checked + .slider:before {
     font-size: 14px;
     color: #555;
     white-space: nowrap;
+    min-width: 70px; /* Ensure enough space for both languages */
 }
 
 /* Responsive design adjustments */
@@ -761,4 +758,191 @@ input:checked + .slider:before {
         margin-top: 10px;
         width: 100%;
     }
+}
+
+/* API Key Button Styling */
+#editApiKeyButton {
+    padding: 8px 14px; /* Slightly wider padding */
+    border: none;
+    background-color: var(--accent-color);
+    color: white;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background-color 0.3s, transform 0.2s;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    white-space: nowrap; /* Prevent line breaking */
+    margin-left: auto; /* Push to the right edge */
+    /* Remove absolute positioning */
+    position: static;
+    top: auto;
+    right: auto;
+}
+
+#editApiKeyButton:hover {
+    background-color: #e0951f; /* Slightly darker on hover */
+    transform: translateY(-2px);
+}
+
+/* Word Cloud Section Styling */
+.word-cloud-section {
+    margin: 20px 0;
+}
+
+/* Responsive Design Adjustments */
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 2rem;
+    }
+    
+    .top-controls-container {
+        flex-wrap: wrap; /* Allow wrapping on smaller screens */
+        justify-content: space-between; /* Better distribution */
+        gap: 15px;
+    }
+    
+    .language-controls {
+        order: 1; /* Keep language controls first */
+        flex: 1;
+        justify-content: flex-start;
+        min-width: 60%; /* Ensure it takes meaningful space */
+        margin-right: 0; /* Remove right margin on smaller screens */
+    }
+    
+    #editApiKeyButton {
+        order: 2; /* API button second */
+        flex: 0 0 auto; /* Don't grow but don't shrink either */
+        margin-top: 0;
+        margin-left: 0; /* Remove left margin on smaller screens */
+    }
+    
+    .top-controls-container {
+        flex-direction: column;
+        gap: 15px;
+        align-items: flex-start;
+    }
+    
+    .language-controls {
+        width: 100%;
+        justify-content: space-between;
+    }
+    
+    #editApiKeyButton {
+        align-self: flex-end;
+        margin-top: 5px;
+    }
+    
+    .word-cloud-container {
+        height: 250px;
+    }
+}
+
+@media (max-width: 480px) {
+    header {
+        padding: 15px 10px;
+    }
+    
+    header h1 {
+        font-size: 1.75rem;
+    }
+    
+    header p {
+        font-size: 1rem;
+    }
+    
+    .language-controls {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .language-selector-container,
+    .translation-toggle-container {
+        width: 100%;
+    }
+    
+    .language-selector {
+        width: 100%;
+    }
+    
+    .toggle-switch {
+        width: 40px;
+    }
+    
+    .word-cloud-container {
+        height: 200px;
+    }
+    
+    .top-controls-container {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+    }
+    
+    .language-controls {
+        flex-direction: row; /* Keep controls in a row if possible */
+        flex-wrap: wrap;
+        justify-content: space-between;
+        width: 100%;
+        margin-right: 0;
+    }
+    
+    #editApiKeyButton {
+        width: 100%;
+        margin-top: 10px;
+        margin-left: 0;
+    }
+}
+
+/* Foldable Section Styling */
+.foldable-section .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    padding-bottom: 0.5rem;
+}
+
+.foldable-section .section-header h2 {
+    margin: 0;
+    flex: 1;
+}
+
+.foldable-section .toggle-button {
+    background: none;
+    border: none;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: transform 0.3s;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+}
+
+.foldable-section.collapsed .toggle-button {
+    transform: rotate(-90deg);
+}
+
+.foldable-section .section-content {
+    overflow: hidden;
+    max-height: 1000px; /* Arbitrary large value */
+    transition: max-height 0.5s ease-in-out;
+}
+
+.foldable-section.collapsed .section-content {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+/* Audio Drop Section specific styles */
+.audio-drop-section.collapsed {
+    padding-bottom: 0.75rem;
+}
+
+.audio-drop-section .section-content {
+    padding-top: 1rem;
 }

@@ -1,6 +1,8 @@
 /**
  * iOS Speech Recognition Service
  * Uses the Web SpeechRecognition API which leverages native iOS speech recognition on iOS devices
+ * Note: The "iOS native speech recognition is not available on this device" warning is NORMAL
+ * on non-iOS devices and can be safely ignored.
  */
 class IOSSpeechService {
     constructor() {

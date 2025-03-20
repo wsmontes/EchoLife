@@ -5,187 +5,207 @@
 
 class TranslationController {
     constructor() {
-        // Default settings
-        this.currentLanguage = localStorage.getItem('echolife_language') || 'en-US';
-        this.translateEnabled = localStorage.getItem('echolife_translate_enabled') === 'true' || false;
+        this.language = localStorage.getItem('echolife_language') || 'en-US';
+        this.translateEnabled = localStorage.getItem('echolife_translate_enabled') === 'true';
         
-        // Initialize state
-        this.initialized = false;
-        
-        // Initialize when DOM is ready
-        if (document.readyState !== 'loading') {
-            this.initialize();
-        } else {
-            document.addEventListener('DOMContentLoaded', () => this.initialize());
-        }
-    }
-    
-    initialize() {
-        // Setup UI elements
+        this.toggleLabel = document.getElementById('translationToggleLabel');
         this.languageSelector = document.getElementById('languageSelector');
         this.translationToggle = document.getElementById('translationToggle');
-        this.translationToggleLabel = document.getElementById('translationToggleLabel');
         
-        if (!this.languageSelector || !this.translationToggle) {
-            console.error('Language controls not found in DOM');
-            return;
+        this.init();
+    }
+    
+    init() {
+        // Set initial state
+        if (this.languageSelector) {
+            this.languageSelector.value = this.language;
         }
         
-        // Set initial states
-        this.languageSelector.value = this.currentLanguage;
-        this.translationToggle.checked = this.translateEnabled;
+        if (this.translationToggle) {
+            this.translationToggle.checked = this.translateEnabled;
+        }
+        
+        // Update the toggle label based on current language
         this.updateToggleLabel();
         
-        // Add event listeners
-        this.languageSelector.addEventListener('change', (e) => this.handleLanguageChange(e));
-        this.translationToggle.addEventListener('change', (e) => this.handleTranslationToggleChange(e));
+        // Translate all interface elements on initialization
+        this.translateInterface();
         
-        // Mark as initialized
-        this.initialized = true;
+        // Set up event listeners
+        if (this.languageSelector) {
+            this.languageSelector.addEventListener('change', (e) => {
+                this.language = e.target.value;
+                localStorage.setItem('echolife_language', this.language);
+                this.updateToggleLabel();
+                
+                // Translate all interface elements
+                this.translateInterface();
+                
+                // Dispatch language changed event
+                window.dispatchEvent(new CustomEvent('languageChanged', {
+                    detail: { language: this.language }
+                }));
+                
+                // Dispatch combined settings event
+                this.dispatchSettingsChanged();
+            });
+        }
         
-        console.log(`Translation controller initialized: language=${this.currentLanguage}, translate=${this.translateEnabled}`);
-        
-        // Announce initial state to other components
-        this.announceSettings();
-        
-        // Update other services directly
-        this.updateServices();
-    }
-    
-    handleLanguageChange(event) {
-        const newLanguage = event.target.value;
-        
-        if (newLanguage === this.currentLanguage) return;
-        
-        this.currentLanguage = newLanguage;
-        localStorage.setItem('echolife_language', newLanguage);
-        
-        // Update UI display text based on new language
-        updateUILanguage(newLanguage);
-        
-        // Update toggle label
-        this.updateToggleLabel();
-        
-        // Announce change to all components
-        this.announceSettings();
-        
-        // Update services directly
-        this.updateServices();
-        
-        console.log(`Language changed to: ${newLanguage}`);
-    }
-    
-    handleTranslationToggleChange(event) {
-        const translateEnabled = event.target.checked;
-        
-        if (translateEnabled === this.translateEnabled) return;
-        
-        this.translateEnabled = translateEnabled;
-        localStorage.setItem('echolife_translate_enabled', translateEnabled);
-        
-        // Update toggle label
-        this.updateToggleLabel();
-        
-        // Announce change to all components
-        this.announceSettings();
-        
-        // Update services directly
-        this.updateServices();
-        
-        console.log(`Translation toggle changed to: ${translateEnabled}`);
+        if (this.translationToggle) {
+            this.translationToggle.addEventListener('change', (e) => {
+                this.translateEnabled = e.target.checked;
+                localStorage.setItem('echolife_translate_enabled', this.translateEnabled);
+                
+                // Dispatch translation settings event
+                this.dispatchSettingsChanged();
+            });
+        }
     }
     
     updateToggleLabel() {
-        if (!this.translationToggleLabel) return;
-        
-        const language = this.currentLanguage === 'pt-BR' ? 'pt-BR' : 'en-US';
-        
-        // Determine the appropriate translation key based on current state
-        const key = this.translateEnabled ? 
-            (language === 'pt-BR' ? 'translation_enabled_pt' : 'translation_enabled_en') :
-            (language === 'pt-BR' ? 'translation_disabled_pt' : 'translation_disabled_en');
-        
-        // Use the translation system for consistency
-        this.translationToggleLabel.textContent = getTranslation(key, language);
-    }
-    
-    updateServices() {
-        // Directly update Chat service if available
-        if (window.chatService) {
-            window.chatService.setLanguage(this.currentLanguage);
-        }
-        
-        // Update iOS speech service if available
-        if (window.iosSpeechService && window.iosSpeechService.isAvailable) {
-            window.iosSpeechService.setLanguage(this.currentLanguage);
-        }
-        
-        // Update speech recognition if available
-        if (window.speechRecognition) {
-            window.speechRecognition.lang = this.currentLanguage;
+        if (this.toggleLabel) {
+            this.toggleLabel.textContent = this.language === 'pt-BR' ? 'Tradução' : 'Translate';
         }
     }
     
-    announceSettings() {
-        // Create and dispatch a custom event with the settings
-        const event = new CustomEvent('translationSettingsChanged', {
-            detail: {
-                language: this.currentLanguage,
-                translateEnabled: this.translateEnabled,
-                // Calculate target language for translation
-                targetLanguage: this.translateEnabled ? 
-                    (this.currentLanguage === 'pt-BR' ? 'en-US' : 'pt-BR') : 
-                    this.currentLanguage
-            }
+    // Translate the entire interface based on current language
+    translateInterface() {
+        // Header section
+        this.updateElementText('header h1', 'app_title');
+        this.updateElementText('header p', 'app_tagline');
+        this.updateElementText('#editApiKeyButton', 'edit_api_key');
+        
+        // Word cloud placeholder
+        this.updateElementText('.word-cloud-placeholder', 'words_appear');
+        
+        // Recording section
+        this.updateElementText('#recordingStatus', 'click_to_start');
+        
+        // Upload section
+        this.updateElementText('.audio-drop-section h2', 'upload_audio');
+        this.updateElementText('.drop-text p:nth-child(1)', 'drop_audio', '.drop-text');
+        this.updateElementText('.drop-text p:nth-child(2)', 'or', '.drop-text');
+        this.updateElementText('.drop-text p:nth-child(3)', 'click_to_select', '.drop-text');
+        this.updateElementText('.drop-text p.supported-formats', 'supported_formats', '.drop-text');
+        this.updateElementText('.whatsapp-hint', 'whatsapp_support');
+        
+        // Chat section
+        this.updateElementText('.chat-section h2', 'ai_response');
+        this.updateElementText('#feedbackButton', 'get_ai_feedback');
+        
+        // Export section
+        this.updateElementText('.export-container h3', 'export_options');
+        this.updateElementText('#exportTxtBtn', 'export_txt');
+        this.updateElementText('#exportSrtBtn', 'export_srt');
+        this.updateElementText('#exportAudioBtn', 'export_audio');
+        this.updateElementText('#exportVideoBtn', 'export_video');
+        
+        // Subtitle preview
+        this.updateElementText('.subtitle-preview-container h4', 'subtitle_preview');
+        this.updateElementText('#previewSubtitleDisplay', 'subtitles_will_appear');
+        this.updateElementText('#closePreviewBtn', 'close_preview');
+        this.updateElementText('#previewSubtitlesBtn', 'preview_with_subtitles');
+        
+        // Tags section
+        this.updateElementText('.tag-section h3', 'ai_response_tags');
+        this.updateElementText('.tag-placeholder', 'tags_will_appear');
+        
+        // History section
+        this.updateElementText('.audio-history-section h2', 'recent_audios');
+        this.updateElementText('.empty-history-message', 'history_appear');
+        
+        // Update all "No response yet" badges if present
+        document.querySelectorAll('.no-response-badge').forEach(badge => {
+            badge.textContent = getTranslation('no_response_yet', this.language);
         });
         
-        window.dispatchEvent(event);
+        // Diagnostic tools
+        this.updateElementText('#testWhisperButton', 'test_whisper_api');
     }
     
-    // Public method to get current settings
+    // Helper method to update text of an element if it exists
+    updateElementText(selector, translationKey, parentSelector = null) {
+        let elements;
+        
+        if (parentSelector) {
+            const parents = document.querySelectorAll(parentSelector);
+            if (!parents || parents.length === 0) return;
+            
+            elements = [];
+            parents.forEach(parent => {
+                const matches = parent.querySelectorAll(selector);
+                if (matches) {
+                    matches.forEach(el => elements.push(el));
+                }
+            });
+        } else {
+            elements = document.querySelectorAll(selector);
+        }
+        
+        if (!elements || elements.length === 0) return;
+        
+        elements.forEach(element => {
+            // Only update text nodes, preserve any child elements
+            if (element.childNodes.length === 0 || 
+                (element.childNodes.length === 1 && element.childNodes[0].nodeType === Node.TEXT_NODE)) {
+                element.textContent = getTranslation(translationKey, this.language);
+            } else {
+                // For elements with children, find the text nodes and update them
+                for (let i = 0; i < element.childNodes.length; i++) {
+                    if (element.childNodes[i].nodeType === Node.TEXT_NODE) {
+                        // Only update non-empty text nodes
+                        if (element.childNodes[i].textContent.trim()) {
+                            // Get text content of the entire element first
+                            const fullText = element.textContent;
+                            // Find icon or span elements (to preserve)
+                            const iconEl = element.querySelector('i, span');
+                            
+                            // Get the translated text
+                            const translated = getTranslation(translationKey, this.language);
+                            
+                            // If there's an icon, make sure to keep it
+                            if (iconEl) {
+                                // Reset the content to just the translated text
+                                element.textContent = translated;
+                                // Re-add the icon at the beginning
+                                element.prepend(iconEl);
+                                // Add a space after the icon
+                                if (iconEl.nextSibling && iconEl.nextSibling.nodeType === Node.TEXT_NODE) {
+                                    iconEl.nextSibling.textContent = ' ' + iconEl.nextSibling.textContent.trim();
+                                }
+                            } else {
+                                // No icon, just update the text
+                                element.textContent = translated;
+                            }
+                            
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    dispatchSettingsChanged() {
+        window.dispatchEvent(new CustomEvent('translationSettingsChanged', {
+            detail: {
+                language: this.language,
+                translateEnabled: this.translateEnabled,
+                targetLanguage: this.language === 'pt-BR' ? 'en-US' : 'pt-BR'
+            }
+        }));
+    }
+    
     getSettings() {
         return {
-            language: this.currentLanguage,
+            language: this.language,
             translateEnabled: this.translateEnabled,
-            // The source language for speech/input is always the UI language
-            sourceLanguage: this.currentLanguage,
-            // The target language depends on whether translation is enabled
-            targetLanguage: this.translateEnabled ? 
-                (this.currentLanguage === 'pt-BR' ? 'en-US' : 'pt-BR') : 
-                this.currentLanguage
+            targetLanguage: this.language === 'pt-BR' ? 'en-US' : 'pt-BR'
         };
-    }
-    
-    // Get the language to use for transcription (the interface language, not the target)
-    getTranscriptionLanguage() {
-        return this.currentLanguage;
-    }
-    
-    // Get the language for the final output text
-    getOutputLanguage() {
-        if (this.translateEnabled) {
-            // If translation is enabled, output in the opposite of the current UI language
-            return this.currentLanguage === 'pt-BR' ? 'en-US' : 'pt-BR';
-        } else {
-            // If translation is disabled, output in the current UI language
-            return this.currentLanguage;
-        }
-    }
-    
-    // Utility method to get human-readable language name
-    getLanguageName(langCode = null) {
-        if (!langCode) langCode = this.currentLanguage;
-        
-        switch (langCode) {
-            case 'pt-BR': return 'Portuguese (Brazil)';
-            case 'en-US': return 'English (US)';
-            default: return langCode;
-        }
     }
 }
 
-// Create a global instance of the translation controller
-const translationController = new TranslationController();
-
-// Make it globally accessible
-window.translationController = translationController;
+// Initialize the translation controller when the DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    window.translationController = new TranslationController();
+});

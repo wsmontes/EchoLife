@@ -17,31 +17,33 @@
         <header>
             <h1>Echo Life</h1>
             <p>Speak and connect with AI</p>
-            <!-- Language controls container -->
-            <div class="language-controls">
-                <!-- Language selector dropdown -->
-                <div class="language-selector-container">
-                    <select id="languageSelector" class="language-selector">
-                        <option value="en-US">English</option>
-                        <option value="pt-BR">Português Brasileiro</option>
-                    </select>
+            
+            <div class="top-controls-container">
+                <!-- Language controls container -->
+                <div class="language-controls">
+                    <!-- Language selector dropdown -->
+                    <div class="language-selector-container">
+                        <select id="languageSelector" class="language-selector">
+                            <option value="en-US">English</option>
+                            <option value="pt-BR">Português Brasileiro</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Translation toggle switch with tooltip - removed info icon -->
+                    <div class="translation-toggle-container">
+                        <label class="toggle-switch" title="Toggle between keeping the original language or translating between English and Portuguese">
+                            <input type="checkbox" id="translationToggle">
+                            <span class="slider round"></span>
+                        </label>
+                        <span class="toggle-label" id="translationToggleLabel">Translate</span>
+                    </div>
                 </div>
                 
-                <!-- Translation toggle switch with tooltip -->
-                <div class="translation-toggle-container">
-                    <label class="toggle-switch" title="Toggle between keeping the original language or translating between English and Portuguese">
-                        <input type="checkbox" id="translationToggle">
-                        <span class="slider round"></span>
-                        <span class="toggle-label" id="translationToggleLabel">Auto-translate</span>
-                    </label>
-                    <i class="fas fa-info-circle translation-info" id="translationInfo" title="When enabled, speech will be translated to the other language. When disabled, the original language will be preserved."></i>
-                </div>
+                <!-- API Key editing button -->
+                <button id="editApiKeyButton">
+                    <i class="fas fa-key"></i> Edit API Key
+                </button>
             </div>
-            
-            <!-- New API Key editing button -->
-            <button id="editApiKeyButton" style="position:absolute; top:10px; right:10px; padding:6px 12px; border:none; background: var(--accent-color); color: white; border-radius:4px; cursor:pointer;">
-                Edit API Key
-            </button>
         </header>
 
         <main>
@@ -70,12 +72,19 @@
             </section>
             
             <!-- Simplified Audio drop area section -->
-            <section class="audio-drop-section">
-                <h2>Upload Audio</h2>
-                <div id="audio-upload-placeholder"></div>
-                <div class="upload-formats-info">
-                    <p>Supported formats: MP3, WAV, M4A, AAC, OPUS, OGG</p>
-                    <p class="whatsapp-hint">WhatsApp voice messages are fully supported.</p>
+            <section class="audio-drop-section foldable-section collapsed">
+                <div class="section-header">
+                    <h2>Upload Audio</h2>
+                    <button class="toggle-button" aria-label="Toggle section">
+                        <i class="fas fa-chevron-down"></i>
+                    </button>
+                </div>
+                <div class="section-content">
+                    <div id="audio-upload-placeholder"></div>
+                    <div class="upload-formats-info">
+                        <p>Supported formats: MP3, WAV, M4A, AAC, OPUS, OGG</p>
+                        <p class="whatsapp-hint">WhatsApp voice messages are fully supported.</p>
+                    </div>
                 </div>
             </section>
             
@@ -175,6 +184,22 @@
             // Create a global word cloud instance
             window.wordCloud = new WordCloud('wordCloudContainer');
             console.log('Word cloud initialized');
+            
+            // Update translation toggle label based on current language
+            const updateToggleLabel = () => {
+                const languageSelector = document.getElementById('languageSelector');
+                const toggleLabel = document.getElementById('translationToggleLabel');
+                
+                if (toggleLabel) {
+                    toggleLabel.textContent = languageSelector.value === 'pt-BR' ? 'Tradução' : 'Translate';
+                }
+            };
+            
+            // Initialize label on page load
+            updateToggleLabel();
+            
+            // Update label when language changes
+            document.getElementById('languageSelector').addEventListener('change', updateToggleLabel);
         });
     </script>
 </body>
