@@ -28,10 +28,13 @@ class IOSSpeechService {
         this.onFinalTranscript = null;
         this.onError = null;
         
+        // Store current language setting and make it visible for debugging
+        this.currentLanguage = localStorage.getItem('echolife_language') || 'en-US';
+        
         // Initialize only if available AND on iOS
         if (this.isAvailable && this.isIOS) {
             this.initialize();
-            console.log(`iOS Speech Service initialized. Version: ${this.iosVersion || 'unknown'}`);
+            console.log(`iOS Speech Service initialized. Version: ${this.iosVersion || 'unknown'}, Language: ${this.currentLanguage}`);
         } else {
             // For safety, on non‐iOS or if not available log and set recognition to null
             console.warn('iOS native speech recognition is not available on this device.');
@@ -57,8 +60,8 @@ class IOSSpeechService {
             this.recognition.interimResults = true;
             
             // Get the user's language preference
-            const userLanguage = localStorage.getItem('echolife_language') || 'en-US';
-            this.recognition.lang = userLanguage; // Set to the user's preferred language
+            this.currentLanguage = localStorage.getItem('echolife_language') || 'en-US';
+            this.recognition.lang = this.currentLanguage; // Set to the user's preferred language
             
             this.recognition.maxAlternatives = 1;
             
@@ -67,7 +70,7 @@ class IOSSpeechService {
             this.recognition.onerror = this.handleError.bind(this);
             this.recognition.onend = this.handleEnd.bind(this);
             
-            console.log(`iOS Speech Recognition initialized with language: ${userLanguage}`);
+            console.log(`iOS Speech Recognition initialized with language: ${this.currentLanguage}`);
         } catch (e) {
             console.error("Failed to initialize iOS Speech Recognition:", e);
             this.isAvailable = false;
@@ -296,6 +299,8 @@ class IOSSpeechService {
     // Add method to update recognition language
     setLanguage(languageCode) {
         if (this.recognition) {
+            // Store the language for reference by other components
+            this.currentLanguage = languageCode;
             this.recognition.lang = languageCode;
             console.log(`iOS Speech Recognition language set to: ${languageCode}`);
             
@@ -316,6 +321,11 @@ class IOSSpeechService {
                 }
             }
         }
+    }
+
+    // Get the current language
+    getLanguage() {
+        return this.currentLanguage;
     }
 }
 

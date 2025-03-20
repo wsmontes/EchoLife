@@ -438,3 +438,66 @@ function getTranslation(key, language) {
 window.translations = translations;
 window.updateUILanguage = updateUILanguage;
 window.getTranslation = getTranslation;
+
+// Utility function to get language display names
+function getLanguageDisplayName(langCode) {
+    switch (langCode) {
+        case 'pt-BR': return 'Portuguese (Brazil)';
+        case 'en-US': return 'English (US)';
+        case 'pt': return 'Portuguese';
+        case 'en': return 'English';
+        default: return langCode;
+    }
+}
+
+// Function to detect if text is likely Portuguese
+function detectPortuguese(text) {
+    if (!text || typeof text !== 'string') return false;
+    
+    // Portuguese-specific words/patterns
+    const portuguesePatterns = [
+        /\b(eu|você|ele|ela|nós|eles)\b/i,
+        /\b(está|estou|estamos|falar|falando|obrigado|obrigada)\b/i,
+        /\b(não|sim|como|quando|onde|porque|quem)\b/i,
+        /\b(um|uma|uns|umas|o|a|os|as|do|da|dos|das)\b/i,
+        /ção\b|\bções\b|mente\b|\bçã/i,
+        /\b(muito|muita|muitos|muitas|pouco|poucas)\b/i
+    ];
+    
+    // Score based on pattern matches
+    let score = 0;
+    for (const pattern of portuguesePatterns) {
+        if (pattern.test(text)) {
+            score++;
+        }
+    }
+    
+    // Portuguese-specific characters
+    const portugueseChars = ['ç', 'ã', 'õ', 'á', 'é', 'í', 'ó', 'ú', 'â', 'ê', 'ô'];
+    for (const char of portugueseChars) {
+        if (text.includes(char)) {
+            score += 2; // Weight these higher as they're very specific to Portuguese
+        }
+    }
+    
+    // Return true if score is above a threshold
+    // Scale threshold based on text length
+    const threshold = Math.min(3, Math.max(1, Math.floor(text.length / 50)));
+    return score >= threshold;
+}
+
+// Function to get the most likely language of text
+function detectTextLanguage(text) {
+    if (!text || typeof text !== 'string') return 'en-US'; // Default to English
+    
+    if (detectPortuguese(text)) {
+        return 'pt-BR';
+    }
+    
+    return 'en-US';
+}
+
+// Make these functions globally available
+window.getLanguageDisplayName = getLanguageDisplayName;
+window.detectPortuguese = detectPortuguese;
+window.detectTextLanguage = detectTextLanguage;

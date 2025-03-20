@@ -327,30 +327,35 @@ document.addEventListener('DOMContentLoaded', () => {
             // For very short text, use a placeholder
             if (text.length < 15) {
                 if (window.wordCloud) {
+                    const language = getEffectiveLanguage();
+                    const placeholderText = language === 'pt-BR' ? 'Ouvindo...' : 'Listening...';
                     window.wordCloud.updateWordCloud([
-                        {text: 'Listening...', confidence: 'low', count: 1, group: "other"}
+                        {text: placeholderText, confidence: 'low', count: 1, group: "other"}
                     ]);
                 }
                 return;
             }
             
-            console.log("Extracting real-time tags from text with length:", text.length);
+            // Get the effective language - prioritize iOS service language if available
+            const language = getEffectiveLanguage();
+            console.log(`Extracting real-time tags with language: ${language}, text length: ${text.length}`);
             
-            // Extract tags from the partial transcript
-            const tags = await tagExtractor.extractTagsRealtime(text);
+            // Extract tags from the partial transcript with explicit language
+            const tags = await tagExtractor.extractTagsRealtime(text, 5, language);
             
             // Validate we have actual tags
             if (!tags || tags.length === 0) {
                 console.warn("No tags extracted, using placeholder");
                 if (window.wordCloud) {
+                    const processingText = language === 'pt-BR' ? 'Processando...' : 'Processing...';
                     window.wordCloud.updateWordCloud([
-                        {text: 'Processing...', confidence: 'low', count: 1, group: "other"}
+                        {text: processingText, confidence: 'low', count: 1, group: "other"}
                     ]);
                 }
                 return;
             }
             
-            console.log("Updating word cloud with tags:", tags.length);
+            console.log(`Updating word cloud with tags: ${tags.length}, language: ${language}`);
             
             // Update word cloud with tags
             if (window.wordCloud) {
@@ -365,11 +370,37 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Error updating real-time tags:', error);
             // Don't fail silently - update with error state
             if (window.wordCloud) {
+                const language = getEffectiveLanguage();
+                const errorText = language === 'pt-BR' ? 'Erro de processamento' : 'Error processing';
                 window.wordCloud.updateWordCloud([
-                    {text: 'Error processing', confidence: 'low', count: 1, group: "other"}
+                    {text: errorText, confidence: 'low', count: 1, group: "other"}
                 ]);
             }
         }
+    }
+    
+    // Helper function to get the effective language from all possible sources
+    function getEffectiveLanguage() {
+        // Check multiple sources in priority order:
+        
+        // 1. First check translation controller if available
+        if (window.translationController) {
+            const settings = window.translationController.getSettings();
+            console.log("Language from translation controller:", settings.language);
+            return settings.language;
+        }
+        
+        // 2. Next check iOS speech service if active (most accurate during recording)
+        if (window.iosSpeechService && window.iosSpeechService.isAvailable) {
+            const iosLang = window.iosSpeechService.getLanguage();
+            console.log("Language from iOS speech service:", iosLang);
+            return iosLang;
+        }
+        
+        // 3. Finally fall back to localStorage
+        const storedLang = localStorage.getItem('echolife_language') || 'en-US';
+        console.log("Language from localStorage:", storedLang);
+        return storedLang;
     }
     
     async function toggleRecording() {
@@ -1514,6 +1545,14 @@ window.addEventListener('translationSettingsChanged', (e) => {
     // Update iOS speech service language if available
     if (window.iosSpeechService && window.iosSpeechService.isAvailable) {
         window.iosSpeechService.setLanguage(settings.language);
+        console.log(`iOS Speech Service language updated to: ${settings.language}`);
+    }
+    
+    // Update word cloud language
+    if (window.wordCloud) {
+        window.wordCloud.language = settings.language;
+        window.wordCloud.updatePlaceholder();
+        console.log(`Word cloud language updated to: ${settings.language}`);
     }
 });
 });

@@ -4,6 +4,12 @@ class ChatService {
         this.messages = [];
         this.conversationMode = false;
         this.language = localStorage.getItem('echolife_language') || 'en-US';
+        
+        // Listen for language/translation changes
+        window.addEventListener('translationSettingsChanged', (e) => {
+            this.language = e.detail.language;
+            console.log(`Chat service updated with language: ${this.language}, translation: ${e.detail.translateEnabled}`);
+        });
     }
 
     setApiKey(key) {
@@ -75,10 +81,20 @@ class ChatService {
             throw new Error('API key not set for Chat service');
         }
 
-        // Get current language
+        // Get translation settings
+        const translationSettings = window.translationController ? 
+            window.translationController.getSettings() : 
+            { language: this.language, translateEnabled: false };
+        
+        // Get preferred language and translation settings
         const language = options.language || this.language || 'en-US';
         const isPortuguese = language === 'pt-BR';
+        const translateEnabled = translationSettings.translateEnabled;
+        const targetLanguage = translationSettings.targetLanguage;
         
+        console.log(`Sending message with language: ${language}, translation: ${translateEnabled ? 'enabled' : 'disabled'}`);
+        
+        // Add user message to history
         this.addMessage('user', content);
         
         // Prepare messages for this request
@@ -88,7 +104,7 @@ class ChatService {
         const useConversationalMode = options.conversationalResponse || this.conversationMode;
         
         if (useConversationalMode) {
-            // Add specific instruction for this message to ensure a conversational response with a question
+            // Add language-specific conversation instruction
             messages.push({
                 role: 'system',
                 content: isPortuguese ?
@@ -104,6 +120,18 @@ class ChatService {
                 Your response should be natural and fluid, like two people in conversation.
                 Don't be robotic or overly formal - speak like a real person who's genuinely interested.`
             });
+        }
+        
+        // If translation is enabled, add translation instruction
+        if (translateEnabled) {
+            const outputLanguage = targetLanguage === 'pt-BR' ? 'Portuguese (Brazilian)' : 'English';
+            
+            messages.push({
+                role: 'system',
+                content: `Please respond in ${outputLanguage} regardless of the language of the user's message.`
+            });
+            
+            console.log(`Added translation instruction to respond in: ${outputLanguage}`);
         }
         
         try {

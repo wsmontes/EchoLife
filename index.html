@@ -27,13 +27,14 @@
                     </select>
                 </div>
                 
-                <!-- Translation toggle switch -->
+                <!-- Translation toggle switch with tooltip -->
                 <div class="translation-toggle-container">
-                    <label class="toggle-switch">
+                    <label class="toggle-switch" title="Toggle between keeping the original language or translating between English and Portuguese">
                         <input type="checkbox" id="translationToggle">
                         <span class="slider round"></span>
                         <span class="toggle-label" id="translationToggleLabel">Auto-translate</span>
                     </label>
+                    <i class="fas fa-info-circle translation-info" id="translationInfo" title="When enabled, speech will be translated to the other language. When disabled, the original language will be preserved."></i>
                 </div>
             </div>
             

@@ -13,8 +13,9 @@ class WordCloud {
         this.collisionDetection = true;
         this.lastUpdateTime = Date.now(); // Track last update time
         
-        // Add language awareness
+        // Add language awareness with log for debugging
         this.language = localStorage.getItem('echolife_language') || 'en-US';
+        console.log(`Word cloud initialized with language: ${this.language}`);
         
         // Setup fullscreen toggle
         const toggleButton = document.getElementById('fullscreenToggle');
@@ -28,6 +29,7 @@ class WordCloud {
         // Listen for language changes
         window.addEventListener('languageChanged', (e) => {
             this.language = e.detail.language;
+            console.log(`Word cloud language changed to: ${this.language}`);
             this.updatePlaceholder();
         });
         
@@ -106,6 +108,7 @@ class WordCloud {
         const placeholder = this.container.querySelector('.word-cloud-placeholder');
         if (placeholder) {
             placeholder.textContent = getTranslation('words_appear', this.language);
+            console.log(`Word cloud placeholder updated to language: ${this.language}`);
         }
     }
     
@@ -134,10 +137,15 @@ class WordCloud {
         }
         
         // Track semantic themes for dynamic color assignment
+        // Log language for debugging
+        console.log(`Word cloud updating with language: ${this.language}, tags: ${tags.length}`);
         const semanticThemes = this.identifyThemes(tags);
         
         // Create a new Map for tracking current update's words
         const currentUpdate = new Map();
+        
+        // Add language/translation indicator to word cloud
+        this.updateLanguageIndicator();
         
         // Process each tag
         for (const tag of tags) {
@@ -157,6 +165,16 @@ class WordCloud {
             let cssClasses = 'word visible';
             if (tag.status === 'uncertain' || tag.uncertain || text.endsWith('?')) {
                 cssClasses += ' uncertain';
+            }
+            if (tag.translated) {
+                cssClasses += ' translated';
+                
+                // Add specific translation direction if available
+                if (tag.translatedTo === 'en-US') {
+                    cssClasses += ' translated-to-en';
+                } else if (tag.translatedTo === 'pt-BR') {
+                    cssClasses += ' translated-to-pt';
+                }
             }
             
             currentUpdate.set(text, {
@@ -299,6 +317,7 @@ class WordCloud {
     identifyThemes(tags) {
         // Add Portuguese-specific theme detection
         const isPortuguese = this.language === 'pt-BR';
+        console.log(`Identifying themes with language: ${this.language}, isPortuguese: ${isPortuguese}`);
         
         // For Portuguese, consider groups based on Brazilian industries/topics
         if (isPortuguese) {
@@ -311,8 +330,65 @@ class WordCloud {
                 'governo': ['governo', 'política', 'público', 'lei', 'legislação', 'presidente', 'ministro', 'congresso']
             };
             
-            // Apply the same theme detection logic but with Portuguese keywords
-            // ...rest of the method remains unchanged
+            // Apply Portuguese-specific grouping logic
+            const themes = [];
+            const processedWords = new Set();
+            
+            // Group words by theme
+            for (const tag of tags) {
+                const word = tag.text.toLowerCase();
+                if (processedWords.has(word)) continue;
+                
+                // Check each theme category
+                let foundTheme = false;
+                for (const [theme, keywords] of Object.entries(themeKeywords)) {
+                    if (keywords.some(keyword => word.includes(keyword.toLowerCase()))) {
+                        // Find other words in the same theme
+                        const relatedWords = tags
+                            .filter(t => !processedWords.has(t.text.toLowerCase()) && 
+                                keywords.some(k => t.text.toLowerCase().includes(k.toLowerCase())))
+                            .map(t => t.text.toLowerCase());
+                        
+                        if (relatedWords.length > 0) {
+                            themes.push({
+                                words: relatedWords,
+                                color: this.generateThemeColor(themes.length)
+                            });
+                            
+                            relatedWords.forEach(w => processedWords.add(w));
+                            foundTheme = true;
+                            break;
+                        }
+                    }
+                }
+                
+                // If not found in any theme, check for related words
+                if (!foundTheme) {
+                    const relatedWords = tags.filter(t => 
+                        this.areWordsRelated(word, t.text.toLowerCase()) && 
+                        !processedWords.has(t.text.toLowerCase())
+                    ).map(t => t.text.toLowerCase());
+                    
+                    if (relatedWords.length > 0) {
+                        relatedWords.push(word);
+                        relatedWords.forEach(w => processedWords.add(w));
+                        
+                        themes.push({
+                            words: relatedWords,
+                            color: this.generateThemeColor(themes.length)
+                        });
+                    } else {
+                        // No theme or related words, add as individual
+                        processedWords.add(word);
+                        themes.push({
+                            words: [word],
+                            color: this.generateThemeColor(themes.length)
+                        });
+                    }
+                }
+            }
+            
+            return themes;
         }
         
         // Original English theme detection
@@ -532,57 +608,33 @@ class WordCloud {
                     totalOverlap += this.calculateOverlap(rect, wordRect);
                 }
             }
-            
-            // If we found a position with less overlap, remember it
-            if (totalOverlap < minOverlap) {
-                minOverlap = totalOverlap;
-                bestPosition = {x, y};
-                
-                // If we found a position with no overlap, use it immediately
-                if (minOverlap === 0) break;
-            }
+        }
+    }
+    
+    updateLanguageIndicator() {
+        // Remove any existing indicator
+        const existingIndicator = this.container.querySelector('.word-cloud-language-indicator');
+        if (existingIndicator) {
+            existingIndicator.remove();
         }
         
-        return bestPosition || {
-            x: Math.random() * maxX + safetyMargin,
-            y: Math.random() * maxY + safetyMargin
-        };
-    }
-    
-    // Check if two rectangles overlap
-    isOverlapping(rect1, rect2) {
-        return (
-            rect1.x < rect2.x + rect2.width &&
-            rect1.x + rect1.width > rect2.x &&
-            rect1.y < rect2.y + rect2.height &&
-            rect1.y + rect1.height > rect2.y
-        );
-    }
-    
-    // Calculate the area of overlap between two rectangles
-    calculateOverlap(rect1, rect2) {
-        const xOverlap = Math.max(0, Math.min(rect1.x + rect1.width, rect2.x + rect2.width) - Math.max(rect1.x, rect2.x));
-        const yOverlap = Math.max(0, Math.min(rect1.y + rect1.height, rect2.y + rect2.height) - Math.max(rect1.y, rect2.y));
-        return xOverlap * yOverlap;
+        // Get translation settings
+        const translationSettings = window.translationController ? 
+            window.translationController.getSettings() : 
+            { language: this.language, translateEnabled: false };
+        
+        // Create indicator with language and translation status
+        const indicator = document.createElement('div');
+        indicator.className = 'word-cloud-language-indicator';
+        
+        if (translationSettings.translateEnabled) {
+            const sourceLang = translationSettings.language === 'pt-BR' ? 'PT' : 'EN';
+            const targetLang = translationSettings.language === 'pt-BR' ? 'EN' : 'PT';
+            indicator.textContent = `${sourceLang} → ${targetLang}`;
+        } else {
+            indicator.textContent = translationSettings.language === 'pt-BR' ? 'Português' : 'English';
+        }
+        
+        this.container.appendChild(indicator);
     }
 }
-
-// Initialize word cloud when document is ready
-let wordCloud;
-document.addEventListener('DOMContentLoaded', () => {
-    wordCloud = new WordCloud('wordCloudContainer');
-    
-    // Make wordCloud globally available
-    window.wordCloud = wordCloud;
-    
-    // Listen for language changes to update the word cloud
-    document.getElementById('languageSelector')?.addEventListener('change', (e) => {
-        const language = e.target.value;
-        wordCloud.language = language;
-        wordCloud.updatePlaceholder();
-        // Dispatch event for other components
-        window.dispatchEvent(new CustomEvent('languageChanged', { 
-            detail: { language } 
-        }));
-    });
-});
