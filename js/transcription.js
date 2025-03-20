@@ -194,23 +194,7 @@ class WhisperTranscriptionService {
             // Validate audio format
             this.validateAudioFormat(audioBlob, metadata);
             
-            console.log(`Transcribing audio: ${audioBlob.size} bytes, format: ${audioBlob.type || 'unknown'}, iOS: ${metadata.isIOS || false}`);
-            
-            // IMPROVED: More aggressive format forcing for iOS to ensure compatibility with Whisper
-            if (metadata.isIOS || (!audioBlob.type || audioBlob.type === '')) {
-                console.log("iOS device or empty MIME type detected - enforcing reliable format");
-                
-                // For iOS, try WAV first as it's most reliable for Whisper, then fallback to MP4
-                // This approach completely bypasses any iOS-specific audio services
-                let mimeType = retryCount === 0 ? 'audio/wav' : 'audio/mp4';
-                
-                try {
-                    audioBlob = new Blob([audioBlob], { type: mimeType });
-                    console.log(`Forced audio format to ${mimeType} for better Whisper compatibility`);
-                } catch (e) {
-                    console.error("Failed to rewrap audio blob:", e);
-                }
-            }
+            console.log(`Transcribing audio: ${audioBlob.size} bytes, format: ${audioBlob.type || 'unknown'}`);
             
             // Determine appropriate file extension based on audio type
             let fileExtension = 'webm';
@@ -290,8 +274,7 @@ class WhisperTranscriptionService {
             
             console.log(`Sending request to Whisper API with filename: ${filename}`);
             
-            // Add 10-second timeout for iOS devices to avoid hanging
-            const timeoutMs = metadata.isIOS ? 30000 : 60000;
+            const timeoutMs = 60000;
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
             
@@ -319,26 +302,6 @@ class WhisperTranscriptionService {
                 // Create better error message
                 const errorMessage = this.parseApiError(response, errorData);
                 
-                // IMPROVED: Simplified retry logic for iOS - focus on format conversion
-                if (metadata.isIOS && retryCount < this.maxIOSRetries) {
-                    console.log(`iOS transcription failed (attempt ${retryCount + 1}/${this.maxIOSRetries}). Trying alternate format...`);
-                    
-                    // Create new audio data with a different format
-                    const newFormat = this.getNextIOSFormat(retryCount);
-                    console.log(`Retry ${retryCount + 1} using format: ${newFormat}`);
-                    
-                    const newAudioData = {
-                        blob: new Blob([audioBlob], { type: newFormat }),
-                        type: newFormat,
-                        isIOS: true,
-                        iosVersion: metadata.iosVersion || 0,
-                        filename: `ios_retry${retryCount + 1}_${Date.now()}.${this.getExtensionForMimeType(newFormat)}`
-                    };
-                    
-                    return await this.transcribeAudio(newAudioData, retryCount + 1);
-                }
-                
-                // If we've retried already or this isn't iOS, throw the error
                 throw new Error(errorMessage);
             }
             
@@ -353,25 +316,6 @@ class WhisperTranscriptionService {
         } catch (error) {
             console.error('Error transcribing audio:', error);
             
-            // IMPROVED: Simplified retry logic that focuses only on format changes
-            if (metadata.isIOS && retryCount < this.maxIOSRetries) {
-                console.log(`Retry attempt ${retryCount + 1}/${this.maxIOSRetries} for iOS...`);
-                
-                // Get next format to try
-                const newFormat = this.getNextIOSFormat(retryCount);
-                console.log(`Retrying with format: ${newFormat}`);
-                
-                const newAudioData = {
-                    blob: new Blob([audioBlob], { type: newFormat }),
-                    type: newFormat,
-                    isIOS: true,
-                    iosVersion: metadata.iosVersion || 0,
-                    filename: `ios_error_retry${retryCount + 1}_${Date.now()}.${this.getExtensionForMimeType(newFormat)}`
-                };
-                
-                return await this.transcribeAudio(newAudioData, retryCount + 1);
-            }
-            
             throw error;
         }
     }
@@ -384,46 +328,6 @@ class WhisperTranscriptionService {
         if (mimeType.includes('ogg')) return 'ogg';
         if (mimeType.includes('opus')) return 'opus';
         return 'audio';
-    }
-    
-    // NEW: Simple format rotation for iOS retries - no dependencies on any Apple services
-    getNextIOSFormat(retryCount) {
-        // Sequence of formats to try for iOS, ordered by reliability with Whisper
-        const formats = [
-            'audio/wav',                   // Initial try - uncompressed but reliable
-            'audio/mp4',                   // Second try - AAC in MP4 container
-            'audio/mpeg',                  // Third try - MP3 format
-            'audio/mp4;codecs=mp4a.40.2'   // Last try - explicit AAC codec
-        ];
-        
-        return formats[retryCount % formats.length];
-    }
-    
-    // REMOVE or REPLACE complicated retry methods that depend on iOS services
-    
-    // Replace this method with a simplified version
-    async retryTranscriptionWithFallback(audioBlob, metadata, retryCount) {
-        console.log("Using simplified format-based retry without iOS services");
-        
-        // Simple format-based retry
-        const newFormat = this.getNextIOSFormat(retryCount);
-        console.log(`Retrying with format: ${newFormat}`);
-        
-        return {
-            blob: new Blob([audioBlob], { type: newFormat }),
-            type: newFormat,
-            isIOS: true,
-            iosVersion: metadata.iosVersion || 0,
-            filename: `ios_fallback_${Date.now()}.${this.getExtensionForMimeType(newFormat)}`
-        };
-    }
-    
-    // Simplify this method to avoid depending on iOS services
-    async retryWithChunkedUpload(audioBlob, metadata, retryCount) {
-        console.log("Using format-based retry instead of chunked upload");
-        
-        // Use the format-based retry instead
-        return this.retryTranscriptionWithFallback(audioBlob, metadata, retryCount);
     }
     
     // Get last transcription error details
