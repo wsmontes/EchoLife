@@ -304,34 +304,66 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // Handle real-time speech updates for tag extraction
+    // Enhanced real-time speech handling for iOS devices
     async function handleRealtimeSpeech(text) {
         const now = Date.now();
         
         // Don't update tags too frequently - at most once every 1.5 seconds
         if (now - lastTagUpdateTime > 1500 && text.length > 10) {
             lastTagUpdateTime = now;
-            updateRealtimeTags(text);
+            console.log("Updating real-time tags with text length:", text.length);
+            await updateRealtimeTags(text);
         }
     }
     
-    // Update tags in real-time during speech
+    // Update tags in real-time during speech with better iOS handling
     async function updateRealtimeTags(text) {
         try {
+            // For very short text, use a placeholder
+            if (text.length < 15) {
+                if (window.wordCloud) {
+                    window.wordCloud.updateWordCloud([
+                        {text: 'Listening...', confidence: 'low', count: 1, group: "other"}
+                    ]);
+                }
+                return;
+            }
+            
+            console.log("Extracting real-time tags from text with length:", text.length);
+            
             // Extract tags from the partial transcript
             const tags = await tagExtractor.extractTagsRealtime(text);
             
-            // Update word cloud instead of using tag display
+            // Validate we have actual tags
+            if (!tags || tags.length === 0) {
+                console.warn("No tags extracted, using placeholder");
+                if (window.wordCloud) {
+                    window.wordCloud.updateWordCloud([
+                        {text: 'Processing...', confidence: 'low', count: 1, group: "other"}
+                    ]);
+                }
+                return;
+            }
+            
+            console.log("Updating word cloud with tags:", tags.length);
+            
+            // Update word cloud with tags
             if (window.wordCloud) {
                 window.wordCloud.updateWordCloud(tags);
             }
             
             // Enable feedback button if we have speech
-            if (recognizedSpeech) {
+            if (recognizedSpeech && feedbackButton) {
                 feedbackButton.disabled = false;
             }
         } catch (error) {
             console.error('Error updating real-time tags:', error);
+            // Don't fail silently - update with error state
+            if (window.wordCloud) {
+                window.wordCloud.updateWordCloud([
+                    {text: 'Error processing', confidence: 'low', count: 1, group: "other"}
+                ]);
+            }
         }
     }
     
@@ -354,23 +386,48 @@ document.addEventListener('DOMContentLoaded', () => {
             // Detect if we should use iOS speech recognition
             const useIOSSpeech = audioRecorder.useIOSSpeech;
             
-            // Set up callbacks for iOS speech recognition
+            // Set up callbacks for iOS speech recognition with robust error handling
             const transcriptionCallbacks = {
                 onTranscriptUpdate: (final, interim) => {
                     // Update tag cloud with the latest transcript
-                    const combinedText = final + interim;
+                    const combinedText = final + ' ' + interim;
+                    console.log("iOS speech update received, text length:", combinedText.length);
+                    
                     if (combinedText.length > 10) {
                         handleRealtimeSpeech(combinedText);
                         recognizedSpeech = true;
+                        
+                        // Store the partial transcript for later use
+                        partialTranscript = final;
+                        
+                        // Debug output to help diagnose issues
+                        if (combinedText.length % 50 === 0) {  // log every ~50 chars
+                            console.log("iOS speech recognition working. Sample:", 
+                                combinedText.substring(0, 40) + "...");
+                        }
                     }
-                    partialTranscript = final;
                 },
                 onFinalTranscript: (transcript) => {
-                    console.log("Final iOS transcript:", transcript);
+                    console.log("Final iOS transcript received, length:", transcript.length);
                     partialTranscript = transcript;
                 },
                 onError: (error) => {
                     console.error("iOS Speech recognition error:", error);
+                    
+                    // If we get a critical error, fall back to browser recognition if available
+                    if (error === 'not-allowed' || error === 'service-not-allowed') {
+                        console.log("Critical iOS speech error, attempting fallback");
+                        
+                        // Try to start browser speech recognition as fallback
+                        if (window.speechRecognition && !window.speechRecognitionActive) {
+                            try {
+                                window.speechRecognition.start();
+                                console.log("Started browser speech recognition as fallback");
+                            } catch (e) {
+                                console.error("Fallback speech recognition failed:", e);
+                            }
+                        }
+                    }
                 }
             };
             

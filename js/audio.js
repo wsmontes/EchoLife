@@ -553,41 +553,48 @@ class AudioRecorder {
         this.isContinuousRecording = false;
     }
 
-    // New method to create a standardized result object
+    // Modified to be more compatible with iOS
     createFinalResult(blob, type) {
-        // For iOS, force use of a compatible format for Whisper by using 'audio/mp4'
+        // Don't modify the type for real-time processing, only for final transcription
+        let finalType = type;
+        
+        // For iOS Whisper API compatibility, we recommend audio/mp4 format
         if (this.isIOS) {
-            console.log("Forcing iOS final audio type to 'audio/mp4' for compatibility");
-            type = 'audio/mp4';
+            console.log(`iOS audio format for transcription: original=${type}, recommended=audio/mp4`);
+            // Only force the type change for the returned object, not the actual blob
+            // This preserves the original format for real-time processing
+            finalType = 'audio/mp4';
         }
 
         const isLikelyWhisperCompatible = 
-            type.includes('mp3') || 
-            type.includes('mp4') || 
-            type.includes('m4a') || 
-            type.includes('wav') ||
-            type.includes('webm') || 
-            type.includes('ogg');
+            finalType.includes('mp3') || 
+            finalType.includes('mp4') || 
+            finalType.includes('m4a') || 
+            finalType.includes('wav') ||
+            finalType.includes('webm') || 
+            finalType.includes('ogg');
         
         // Generate a debug-friendly filename
         const timestamp = Date.now();
         const ext = this.isIOS ? 'm4a' : 
-                  (type.includes('webm') ? 'webm' : 
-                  (type.includes('mp3') ? 'mp3' : 
-                  (type.includes('mp4') || type.includes('m4a') ? 'm4a' : 'audio')));
+                  (finalType.includes('webm') ? 'webm' : 
+                  (finalType.includes('mp3') ? 'mp3' : 
+                  (finalType.includes('mp4') || finalType.includes('m4a') ? 'm4a' : 'audio')));
+        
         const filename = `recording_${this.isIOS ? 'ios' + this.iosVersion + '_' : ''}${timestamp}.${ext}`;
         
-        // For iOS, if not already compatible, mark for conversion (this branch is less likely now)
+        // For iOS, if not already compatible, mark for conversion
         if (this.isIOS) {
             const isWhisperCompatible = 
-                type.includes('mp3') || 
-                type.includes('mp4') || 
-                (type.includes('m4a') && !type.includes('webm'));
+                finalType.includes('mp3') || 
+                finalType.includes('mp4') || 
+                (finalType.includes('m4a') && !finalType.includes('webm'));
+            
             if (!isWhisperCompatible) {
                 console.log("iOS audio format may not be compatible with Whisper, marking for conversion");
                 return {
                     blob: blob,
-                    type: type,
+                    type: type, // Keep original type to preserve compatibility
                     isIOS: this.isIOS,
                     iosVersion: this.iosVersion,
                     chunks: this.audioChunks.length,
@@ -603,7 +610,7 @@ class AudioRecorder {
         
         return {
             blob: blob,
-            type: type,
+            type: type, // Keep original type for compatibility with existing code
             isIOS: this.isIOS,
             iosVersion: this.iosVersion,
             chunks: this.audioChunks.length,
@@ -611,7 +618,9 @@ class AudioRecorder {
             codecInfo: this.mediaRecorder.mimeType || 'unknown',
             filename: filename,
             preferredFormatForWhisper: this.isIOS ? 'audio/mp4' : type,
-            likelyCompatible: isLikelyWhisperCompatible
+            likelyCompatible: isLikelyWhisperCompatible,
+            // Add original properties to ensure backward compatibility
+            originalType: type
         };
     }
     
@@ -635,8 +644,11 @@ class AudioRecorder {
         if (this.isIOS) {
             // Always try to use iOS native speech recognition first on iOS devices
             if (window.iosSpeechService && window.iosSpeechService.isAvailable) {
+                // Start audio recording first
                 const success = await this.startRecording();
                 if (success) {
+                    console.log("iOS recording started successfully, setting up speech recognition");
+                    
                     // Set up callbacks for iOS speech service
                     if (callbacks.onTranscriptUpdate) {
                         window.iosSpeechService.setTranscriptUpdateCallback(callbacks.onTranscriptUpdate);
@@ -648,9 +660,16 @@ class AudioRecorder {
                         window.iosSpeechService.setErrorCallback(callbacks.onError);
                     }
                     
-                    // Start iOS speech recognition
-                    window.iosSpeechService.startListening();
-                    this.useIOSSpeech = true;
+                    // Start iOS speech recognition and handle potential failures
+                    const speechStarted = window.iosSpeechService.startListening();
+                    this.useIOSSpeech = speechStarted;
+                    
+                    if (!speechStarted) {
+                        console.warn("iOS speech recognition failed to start, falling back to standard recording");
+                    } else {
+                        console.log("iOS speech recognition started successfully");
+                    }
+                    
                     return true;
                 }
                 return success;

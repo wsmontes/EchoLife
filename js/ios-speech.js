@@ -48,19 +48,26 @@ class IOSSpeechService {
     }
     
     initialize() {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        this.recognition = new SpeechRecognition();
-        
-        // Configure recognition
-        this.recognition.continuous = true;
-        this.recognition.interimResults = true;
-        this.recognition.lang = 'en-US'; // Default to English
-        this.recognition.maxAlternatives = 1;
-        
-        // Set up event handlers
-        this.recognition.onresult = this.handleResult.bind(this);
-        this.recognition.onerror = this.handleError.bind(this);
-        this.recognition.onend = this.handleEnd.bind(this);
+        try {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            this.recognition = new SpeechRecognition();
+            
+            // Configure recognition
+            this.recognition.continuous = true;
+            this.recognition.interimResults = true;
+            this.recognition.lang = 'en-US'; // Default to English
+            this.recognition.maxAlternatives = 1;
+            
+            // Set up event handlers
+            this.recognition.onresult = this.handleResult.bind(this);
+            this.recognition.onerror = this.handleError.bind(this);
+            this.recognition.onend = this.handleEnd.bind(this);
+            
+            console.log("iOS Speech Recognition initialized successfully");
+        } catch (e) {
+            console.error("Failed to initialize iOS Speech Recognition:", e);
+            this.isAvailable = false;
+        }
     }
     
     handleResult(event) {
@@ -118,8 +125,8 @@ class IOSSpeechService {
             this.onError(event.error);
         }
         
-        // Auto-restart on network errors if still supposed to be listening
-        if (this.isListening && (event.error === 'network' || event.error === 'service-not-allowed')) {
+        // Auto-restart on network errors or permission errors if still supposed to be listening
+        if (this.isListening && (event.error === 'network' || event.error === 'service-not-allowed' || event.error === 'not-allowed')) {
             console.log('Attempting to restart iOS Speech Recognition after error');
             setTimeout(() => this.restartListening(), 1000);
         }
@@ -182,6 +189,7 @@ class IOSSpeechService {
     
     startListening() {
         if (!this.isAvailable || !this.recognition) {
+            console.log("iOS Speech Recognition not available");
             return false;
         }
         
@@ -205,15 +213,24 @@ class IOSSpeechService {
             // Try to handle "already running" error
             if (e.name === 'InvalidStateError') {
                 try {
+                    console.log("Recognition already running, stopping and restarting");
                     this.recognition.stop();
                     setTimeout(() => {
-                        this.recognition.start();
-                        this.isListening = true;
-                        this.recognitionInProgress = true;
-                    }, 500);
+                        try {
+                            this.recognition.start();
+                            this.isListening = true;
+                            this.recognitionInProgress = true;
+                            console.log("Recognition restarted successfully");
+                        } catch (startError) {
+                            console.error("Error restarting recognition:", startError);
+                            this.isAvailable = false; // Mark as unavailable if we can't restart
+                            return false;
+                        }
+                    }, 300);
                     return true;
                 } catch (stopError) {
                     console.error('Error in stop-start sequence:', stopError);
+                    this.isAvailable = false; // Mark as unavailable if we can't recover
                 }
             }
             
