@@ -4,50 +4,85 @@
     max-width: 600px;
     margin: 20px auto;
     padding: 20px;
-    border-radius: 8px;
-    background-color: #f9f9f9;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    border-radius: 12px;
+    background-color: #ffffff;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    transition: all 0.3s ease;
 }
 
 .upload-area {
-    border: 2px dashed #ccc;
-    border-radius: 6px;
+    border: 2px dashed #d1d9e6;
+    border-radius: 10px;
     padding: 30px;
     text-align: center;
     cursor: pointer;
     transition: all 0.3s ease;
     margin-bottom: 15px;
+    background-color: #f8faff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 180px;
 }
 
 .upload-area.highlight {
-    border-color: #2196f3;
-    background-color: rgba(33, 150, 243, 0.1);
+    border-color: #3a86ff;
+    background-color: rgba(58, 134, 255, 0.05);
+    transform: scale(1.01);
+}
+
+.upload-area.processing {
+    background-color: rgba(58, 134, 255, 0.05);
 }
 
 .upload-icon {
-    font-size: 48px;
-    color: #666;
-    margin-bottom: 15px;
+    font-size: 52px;
+    color: #6c7983;
+    margin-bottom: 18px;
+    transition: transform 0.3s ease, color 0.3s ease;
+}
+
+.upload-area:hover .upload-icon {
+    transform: scale(1.1);
+    color: #3a86ff;
 }
 
 .upload-text p {
-    margin: 5px 0;
-    color: #666;
+    margin: 6px 0;
+    color: #6c7983;
+    font-size: 16px;
+    font-weight: 500;
+}
+
+.supported-formats {
+    font-size: 13px;
+    color: #939dab;
+    margin-top: 12px;
 }
 
 .upload-button {
     display: inline-block;
-    padding: 8px 16px;
-    background-color: #2196f3;
+    padding: 10px 20px;
+    background-color: #3a86ff;
     color: white;
-    border-radius: 4px;
-    cursor: pointer;
-    margin-top: 10px;
-    transition: background-color 0.3s ease;
+    border-radius: 8px;
+    font-weight: 600;
+    margin-top: 12px;
+    transition: all 0.3s ease;
+    border: none;
+    outline: none;
+    box-shadow: 0 4px 8px rgba(58, 134, 255, 0.2);
 }
 
-.upload-button:hover {
-    background-color: #0b7dda;
+.upload-button:hover, .upload-button:focus {
+    background-color: #2a75ef;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(58, 134, 255, 0.3);
+}
+
+.upload-button:active {
+    transform: translateY(0);
 }
 
 .selected-file-info {
@@ -428,5 +463,39 @@
     .whatsapp-upload-btn {
         width: 100%;
         justify-content: center;
+    }
+}
+
+/* Mobile optimizations */
+@media screen and (max-width: 576px) {
+    .upload-container {
+        padding: 15px;
+        margin: 15px auto;
+    }
+    
+    .upload-area {
+        padding: 20px;
+        min-height: 150px;
+    }
+    
+    .upload-icon {
+        font-size: 42px;
+    }
+    
+    .upload-text p {
+        font-size: 15px;
+    }
+}
+
+/* iOS specific optimizations */
+@supports (-webkit-touch-callout: none) {
+    .upload-area {
+        padding: 25px 20px;
+        -webkit-appearance: none;
+    }
+    
+    .upload-button {
+        -webkit-appearance: none;
+        -webkit-tap-highlight-color: transparent;
     }
 }
