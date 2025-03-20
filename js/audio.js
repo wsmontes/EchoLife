@@ -13,7 +13,10 @@ class AudioRecorder {
         // Flag to indicate if browser transcription might be more reliable than Whisper
         this.preferBrowserTranscription = this.isIOS && (this.iosVersion >= 16);
         
-        console.log(`Device detection: iOS: ${this.isIOS}, version: ${this.iosVersion || 'unknown'}, problem device: ${this.isIOSProblem}, prefer browser transcription: ${this.preferBrowserTranscription}`);
+        // Flag to indicate whether we should use iOS native speech recognition
+        this.useIOSSpeech = this.isIOS && window.iosSpeechService && window.iosSpeechService.isAvailable;
+        
+        console.log(`Device detection: iOS: ${this.isIOS}, version: ${this.iosVersion || 'unknown'}, problem device: ${this.isIOSProblem}, prefer browser transcription: ${this.preferBrowserTranscription}, use iOS speech: ${this.useIOSSpeech}`);
         
         // Set recording interval for iOS (ms) - shorter for iOS to avoid buffer issues
         this.recordingInterval = this.isIOS ? 1000 : 3000;
@@ -332,9 +335,67 @@ class AudioRecorder {
     
     // New method to check if browser transcription should be preferred
     shouldPreferBrowserTranscription() {
-        // For iOS devices with known audio format problems with Whisper,
-        // return true to encourage using browser SpeechRecognition
-        return this.preferBrowserTranscription;
+        // Only return true for iOS devices with the iOS speech service
+        return this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable;
+    }
+    
+    // New method to get the appropriate transcription service
+    getTranscriptionService() {
+        if (this.useIOSSpeech) {
+            return window.iosSpeechService;
+        }
+        return window.transcriptionService;
+    }
+    
+    // New method to record audio with the appropriate transcription method
+    async startRecordingWithTranscription(callbacks = {}) {
+        // For iOS devices, use the iOS speech recognition service if available
+        if (this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable) {
+            const success = await this.startRecording();
+            if (success) {
+                // Set up callbacks for iOS speech service
+                if (callbacks.onTranscriptUpdate) {
+                    window.iosSpeechService.setTranscriptUpdateCallback(callbacks.onTranscriptUpdate);
+                }
+                if (callbacks.onFinalTranscript) {
+                    window.iosSpeechService.setFinalTranscriptCallback(callbacks.onFinalTranscript);
+                }
+                if (callbacks.onError) {
+                    window.iosSpeechService.setErrorCallback(callbacks.onError);
+                }
+                
+                // Start iOS speech recognition
+                window.iosSpeechService.startListening();
+                return true;
+            }
+            return success;
+        } else {
+            // For non-iOS devices, just start regular recording
+            return this.startRecording();
+        }
+    }
+
+    async stopRecordingWithTranscription() {
+        // For iOS devices, stop the iOS speech recognition service first if available
+        let iosTranscript = null;
+        let useIOSSpeech = false;
+        
+        if (this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable) {
+            // Get transcript from iOS speech service
+            iosTranscript = window.iosSpeechService.stopListening();
+            useIOSSpeech = true;
+            console.log("iOS Speech transcript:", iosTranscript);
+        }
+        
+        // Stop the audio recording (works for all devices)
+        const audioResult = await this.stopRecording();
+        
+        // Return both the audio result and the iOS transcript
+        return {
+            audio: audioResult,
+            iosTranscript: iosTranscript,
+            useIOSSpeech: useIOSSpeech
+        };
     }
     
     stopMediaTracks() {

@@ -342,14 +342,39 @@ document.addEventListener('DOMContentLoaded', () => {
             // Clear the AI tags display
             aiTagsContainer.innerHTML = '<span class="tag-placeholder">Tags from AI responses will appear here</span>';
             
-            const started = await audioRecorder.startRecording();
+            // Detect if we should use iOS speech recognition
+            const useIOSSpeech = audioRecorder.useIOSSpeech;
+            
+            // Set up callbacks for iOS speech recognition
+            const transcriptionCallbacks = {
+                onTranscriptUpdate: (final, interim) => {
+                    // Update tag cloud with the latest transcript
+                    const combinedText = final + interim;
+                    if (combinedText.length > 10) {
+                        handleRealtimeSpeech(combinedText);
+                        recognizedSpeech = true;
+                    }
+                    partialTranscript = final;
+                },
+                onFinalTranscript: (transcript) => {
+                    console.log("Final iOS transcript:", transcript);
+                    partialTranscript = transcript;
+                },
+                onError: (error) => {
+                    console.error("iOS Speech recognition error:", error);
+                }
+            };
+            
+            // Start recording with the appropriate transcription service
+            const started = await audioRecorder.startRecordingWithTranscription(transcriptionCallbacks);
+            
             if (started) {
                 recordingStatus.textContent = 'Recording... Click to stop';
                 recordingIndicator.classList.remove('hidden');
                 feedbackButton.disabled = true;
                 
-                // Start real-time speech recognition if available
-                if (window.speechRecognition) {
+                // Start real-time speech recognition if we're not using iOS native recognition
+                if (!useIOSSpeech && window.speechRecognition) {
                     try {
                         // Reset timestamps before starting
                         window.lastSpeechRecognitionEvent = Date.now();
@@ -400,7 +425,7 @@ document.addEventListener('DOMContentLoaded', () => {
             recordingIndicator.classList.add('hidden');
             
             // Stop the speech recognition
-            if (window.speechRecognition) {
+            if (!audioRecorder.useIOSSpeech && window.speechRecognition) {
                 try {
                     window.speechRecognition.stop();
                 } catch (e) {
@@ -419,35 +444,43 @@ document.addEventListener('DOMContentLoaded', () => {
             recordButton.disabled = true;
             recordButton.classList.add('processing');
             
-            const audioResult = await audioRecorder.stopRecording();
+            // Stop the recording and get results
+            const result = await audioRecorder.stopRecordingWithTranscription();
+            const audioResult = result.audio;
             
             if (audioResult && audioResult.blob && audioResult.blob.size > 0) {
                 try {
                     console.log(`Processing audio recording: ${audioResult.blob.size} bytes, type: ${audioResult.blob.type}, chunks: ${audioResult.chunks || 1}`);
                     recordingStatus.textContent = 'Transcribing audio...';
                     
-                    // Save the browser's real-time transcription as a fallback
-                    const browserTranscription = partialTranscript.trim();
-                    let transcriptionSource = "whisper"; // Track which system provided the transcription
+                    let transcriptionSource = "whisper"; // Default to using Whisper API
                     
-                    try {
-                        // Try to use Whisper API first
-                        currentTranscript = await transcriptionService.transcribeAudio(audioResult);
-                        console.log("Whisper transcription result:", currentTranscript ? "Success" : "Empty");
-                    } catch (whisperError) {
-                        console.error('Whisper transcription failed:', whisperError);
-                        
-                        // If we're on iOS and we have browser transcription, use it as fallback
-                        if (audioRecorder.isIOS && browserTranscription && browserTranscription.length > 10) {
-                            console.log('Using browser SpeechRecognition as fallback on iOS');
-                            currentTranscript = browserTranscription;
-                            transcriptionSource = "browser";
+                    // Decide which transcription to use based on the device
+                    if (result.useIOSSpeech && result.iosTranscript) {
+                        // Use iOS native speech recognition result
+                        currentTranscript = result.iosTranscript;
+                        transcriptionSource = "ios";
+                        console.log("Using iOS native speech recognition result:", currentTranscript);
+                    } else {
+                        // Try Whisper API
+                        try {
+                            currentTranscript = await transcriptionService.transcribeAudio(audioResult);
+                            console.log("Whisper transcription result:", currentTranscript);
+                        } catch (whisperError) {
+                            console.error('Whisper transcription failed:', whisperError);
                             
-                            // Show a note that we're using the browser transcription
-                            alert("Using your device's built-in speech recognition as a fallback. This may be less accurate than our cloud service, but should work for simple recordings.");
-                        } else {
-                            // If no fallback is available, rethrow the error
-                            throw whisperError;
+                            // If we have browser transcription as fallback, use it
+                            if (partialTranscript && partialTranscript.length > 10) {
+                                console.log('Using browser SpeechRecognition as fallback');
+                                currentTranscript = partialTranscript;
+                                transcriptionSource = "browser";
+                                
+                                // Show a note that we're using the browser transcription
+                                alert("Using your device's built-in speech recognition as a fallback. This may be less accurate than our cloud service, but should work for simple recordings.");
+                            } else {
+                                // If no fallback is available, rethrow the error
+                                throw whisperError;
+                            }
                         }
                     }
                     
