@@ -196,17 +196,19 @@ class WhisperTranscriptionService {
             
             console.log(`Transcribing audio: ${audioBlob.size} bytes, format: ${audioBlob.type || 'unknown'}, iOS: ${metadata.isIOS || false}`);
             
-            // MODIFIED: Enhanced handling for iOS - always try to enforce a known MIME type for better Whisper compatibility
+            // IMPROVED: More aggressive format forcing for iOS to ensure compatibility with Whisper
             if (metadata.isIOS || (!audioBlob.type || audioBlob.type === '')) {
-                console.log("iOS device or empty MIME type - creating new blob with explicit type");
+                console.log("iOS device or empty MIME type detected - enforcing reliable format");
+                
+                // For iOS, try WAV first as it's most reliable for Whisper, then fallback to MP4
+                // This approach completely bypasses any iOS-specific audio services
+                let mimeType = retryCount === 0 ? 'audio/wav' : 'audio/mp4';
+                
                 try {
-                    // Create a new blob with an explicit MIME type that Whisper handles well
-                    audioBlob = new Blob([audioBlob], { 
-                        type: metadata.preferredFormatForWhisper || 'audio/mp4' 
-                    });
-                    console.log(`Rewrapped audio with type: ${audioBlob.type}`);
+                    audioBlob = new Blob([audioBlob], { type: mimeType });
+                    console.log(`Forced audio format to ${mimeType} for better Whisper compatibility`);
                 } catch (e) {
-                    console.error("Failed to rewrap audio:", e);
+                    console.error("Failed to rewrap audio blob:", e);
                 }
             }
             
@@ -263,10 +265,10 @@ class WhisperTranscriptionService {
             let filename;
             
             if (metadata.isIOS) {
-                const hasExplicitCodec = audioBlob.type?.includes('codecs=');
-                const codecHint = hasExplicitCodec ? '_aac' : '';
-                filename = `ios${metadata.iosVersion || ''}${codecHint}_recording_${uniqueId}.${fileExtension}`;
-                console.log(`Using iOS-specific filename: ${filename}`);
+                // Use simpler filename pattern with clear format indication for diagnostic purposes
+                const format = audioBlob.type.split('/')[1]?.split(';')[0] || 'audio';
+                filename = `ios_whisper_${format}_${uniqueId}.${fileExtension}`;
+                console.log(`Using diagnostic filename for iOS: ${filename}`);
             } else if (metadata.isWhatsApp) {
                 const isIOSWhatsApp = metadata.filename && metadata.filename.endsWith('.m4a');
                 filename = isIOSWhatsApp 
@@ -317,12 +319,22 @@ class WhisperTranscriptionService {
                 // Create better error message
                 const errorMessage = this.parseApiError(response, errorData);
                 
-                // Try again with a different format for iOS if this is our first try
+                // IMPROVED: Simplified retry logic for iOS - focus on format conversion
                 if (metadata.isIOS && retryCount < this.maxIOSRetries) {
                     console.log(`iOS transcription failed (attempt ${retryCount + 1}/${this.maxIOSRetries}). Trying alternate format...`);
                     
-                    // For iOS, try a sequence of different formats
-                    const newAudioData = await this.getIOSFormatAttempt(audioBlob, metadata, retryCount);
+                    // Create new audio data with a different format
+                    const newFormat = this.getNextIOSFormat(retryCount);
+                    console.log(`Retry ${retryCount + 1} using format: ${newFormat}`);
+                    
+                    const newAudioData = {
+                        blob: new Blob([audioBlob], { type: newFormat }),
+                        type: newFormat,
+                        isIOS: true,
+                        iosVersion: metadata.iosVersion || 0,
+                        filename: `ios_retry${retryCount + 1}_${Date.now()}.${this.getExtensionForMimeType(newFormat)}`
+                    };
+                    
                     return await this.transcribeAudio(newAudioData, retryCount + 1);
                 }
                 
@@ -341,191 +353,79 @@ class WhisperTranscriptionService {
         } catch (error) {
             console.error('Error transcribing audio:', error);
             
-            // Special iOS retry logic with multiple fallback strategies
+            // IMPROVED: Simplified retry logic that focuses only on format changes
             if (metadata.isIOS && retryCount < this.maxIOSRetries) {
                 console.log(`Retry attempt ${retryCount + 1}/${this.maxIOSRetries} for iOS...`);
                 
-                // For transmission errors or timeout errors (vs. rejection errors)
-                if (error.name === 'AbortError' || error.message.includes('network') || error.message.includes('timeout')) {
-                    console.log("Network error detected - trying with smaller chunks or different encoding");
-                    return this.retryWithChunkedUpload(audioBlob, metadata, retryCount);
-                } else {
-                    return this.retryTranscriptionWithFallback(audioBlob, metadata, retryCount);
-                }
+                // Get next format to try
+                const newFormat = this.getNextIOSFormat(retryCount);
+                console.log(`Retrying with format: ${newFormat}`);
+                
+                const newAudioData = {
+                    blob: new Blob([audioBlob], { type: newFormat }),
+                    type: newFormat,
+                    isIOS: true,
+                    iosVersion: metadata.iosVersion || 0,
+                    filename: `ios_error_retry${retryCount + 1}_${Date.now()}.${this.getExtensionForMimeType(newFormat)}`
+                };
+                
+                return await this.transcribeAudio(newAudioData, retryCount + 1);
             }
             
             throw error;
         }
     }
     
-    // Retry with fallback approaches for iOS
+    // NEW: Helper method to get file extension from MIME type
+    getExtensionForMimeType(mimeType) {
+        if (mimeType.includes('wav')) return 'wav';
+        if (mimeType.includes('mp4') || mimeType.includes('m4a')) return 'm4a';
+        if (mimeType.includes('mp3') || mimeType.includes('mpeg')) return 'mp3';
+        if (mimeType.includes('ogg')) return 'ogg';
+        if (mimeType.includes('opus')) return 'opus';
+        return 'audio';
+    }
+    
+    // NEW: Simple format rotation for iOS retries - no dependencies on any Apple services
+    getNextIOSFormat(retryCount) {
+        // Sequence of formats to try for iOS, ordered by reliability with Whisper
+        const formats = [
+            'audio/wav',                   // Initial try - uncompressed but reliable
+            'audio/mp4',                   // Second try - AAC in MP4 container
+            'audio/mpeg',                  // Third try - MP3 format
+            'audio/mp4;codecs=mp4a.40.2'   // Last try - explicit AAC codec
+        ];
+        
+        return formats[retryCount % formats.length];
+    }
+    
+    // REMOVE or REPLACE complicated retry methods that depend on iOS services
+    
+    // Replace this method with a simplified version
     async retryTranscriptionWithFallback(audioBlob, metadata, retryCount) {
-        try {
-            // For iOS devices, prioritize using on-device speech recognition
-            if (metadata.isIOS && window.iosSpeechService && window.iosSpeechService.isAvailable) {
-                console.log("Whisper API failed for iOS. Checking if we have iOS Speech transcript available");
-                
-                // See if we have a transcript from iOS speech recognition
-                const iosTranscript = window.iosSpeechService.getCurrentTranscript()?.final;
-                
-                if (iosTranscript && iosTranscript.trim().length > 10) {
-                    console.log("Using iOS native speech recognition as fallback");
-                    return iosTranscript;
-                }
-            }
-            
-            // If iOS speech transcript isn't available, try alternative formats
-            const newAudioData = await this.getAlternativeAudioFormat(audioBlob, metadata, retryCount);
-            return await this.transcribeAudio(newAudioData, retryCount + 1);
-        } catch (error) {
-            console.error(`Fallback ${retryCount + 1} failed:`, error);
-            
-            // Last chance - check if we have browser transcript
-            if (metadata.isIOS && window.iosSpeechService) {
-                const partial = window.iosSpeechService.getCurrentTranscript()?.combined;
-                if (partial && partial.length > 5) {
-                    console.log("Using partial iOS speech transcript as last resort");
-                    return partial;
-                }
-            }
-            
-            throw new Error(
-                `Transcription failed despite multiple attempts. Latest error: ${error.message}. ` +
-                `For iOS devices, try using the audio upload option instead of recording directly.`
-            );
-        }
-    }
-    
-    // Get alternative formats for retries
-    async getAlternativeAudioFormat(audioBlob, metadata, retryCount) {
-        // For first retry on iOS, try with mp4 extension
-        if (retryCount === 0) {
-            console.log("Attempting first fallback format for iOS");
-            return {
-                blob: audioBlob,
-                type: 'audio/mp4',
-                isIOS: metadata.isIOS,
-                iosVersion: metadata.iosVersion,
-                retry: retryCount + 1
-            };
-        }
+        console.log("Using simplified format-based retry without iOS services");
         
-        // For second retry, try using a generic type
-        if (retryCount === 1) {
-            console.log("Attempting second fallback format for iOS");
-            return {
-                blob: audioBlob,
-                type: 'audio/mpeg',
-                isIOS: metadata.isIOS,
-                iosVersion: metadata.iosVersion,
-                retry: retryCount + 1 
-            };
-        }
-        
-        // No more fallbacks
-        throw new Error("All fallback options exhausted");
-    }
-    
-    // New method: Get specific format for each iOS retry attempt
-    async getIOSFormatAttempt(audioBlob, metadata, retryCount) {
-        // Different strategies for different retry attempts
-        switch (retryCount) {
-            case 0:
-                // First retry: explicit MP4/AAC format
-                console.log("iOS retry 1: Using explicit AAC codec in MP4 container");
-                return {
-                    blob: new Blob([audioBlob], { type: 'audio/mp4;codecs=mp4a.40.2' }),
-                    type: 'audio/mp4;codecs=mp4a.40.2',
-                    isIOS: true,
-                    iosVersion: metadata.iosVersion,
-                    retry: retryCount + 1,
-                    filename: `ios_retry1_${Date.now()}.m4a`
-                };
-            
-            case 1:
-                // Second retry: MP3 format
-                console.log("iOS retry 2: Using MP3 format");
-                return {
-                    blob: new Blob([audioBlob], { type: 'audio/mpeg' }),
-                    type: 'audio/mpeg',
-                    isIOS: true,
-                    iosVersion: metadata.iosVersion,
-                    retry: retryCount + 1,
-                    filename: `ios_retry2_${Date.now()}.mp3`
-                };
-                
-            case 2:
-                // Third retry: WAV format (uncompressed but reliable)
-                console.log("iOS retry 3: Using WAV format");
-                return {
-                    blob: new Blob([audioBlob], { type: 'audio/wav' }),
-                    type: 'audio/wav', 
-                    isIOS: true,
-                    iosVersion: metadata.iosVersion,
-                    retry: retryCount + 1,
-                    filename: `ios_retry3_${Date.now()}.wav`
-                };
-                
-            default:
-                // Last resort: try the first chunk directly
-                if (metadata.chunks > 1 && metadata.chunkSizes && metadata.chunkSizes[0] > 1000) {
-                    console.log("Last resort: Using just the first audio chunk in original format");
-                    // This approach would need the actual chunks, which we don't have here
-                    // In practice, you'd need to modify the audio recorder to keep the chunks
-                    throw new Error("All iOS format attempts failed.");
-                } else {
-                    throw new Error("All iOS format attempts failed.");
-                }
-        }
-    }
-    
-    // New method: Try breaking into smaller chunks (not fully implemented)
-    async retryWithChunkedUpload(audioBlob, metadata, retryCount) {
-        console.log("Attempting upload with different chunking strategy");
-        
-        // For now, just try with a different content type as a fallback
-        return this.retryTranscriptionWithFallback(audioBlob, metadata, retryCount);
-    }
-    
-    // Specific iOS reformatting for audio
-    async reformatAudioForIOS(audioBlob, metadata) {
-        console.log("Reformatting audio for iOS compatibility");
-        
-        // Try with a different MIME type based on iOS version
-        let newType;
-        if (metadata.iosVersion >= 18) {
-            newType = 'audio/mp4';
-        } else if (metadata.iosVersion >= 15) {
-            newType = 'audio/m4a';
-        } else {
-            newType = 'audio/mpeg';
-        }
-        
-        // Create a new blob with the same data but different type
-        const newBlob = new Blob([audioBlob], { type: newType });
+        // Simple format-based retry
+        const newFormat = this.getNextIOSFormat(retryCount);
+        console.log(`Retrying with format: ${newFormat}`);
         
         return {
-            blob: newBlob,
-            type: newType,
-            isIOS: metadata.isIOS,
-            iosVersion: metadata.iosVersion
+            blob: new Blob([audioBlob], { type: newFormat }),
+            type: newFormat,
+            isIOS: true,
+            iosVersion: metadata.iosVersion || 0,
+            filename: `ios_fallback_${Date.now()}.${this.getExtensionForMimeType(newFormat)}`
         };
     }
     
-    // New method to convert iOS audio to a more compatible format
-    async convertAudioForIOS(audioBlob) {
-        console.log("Converting iOS audio to MP3 format for better compatibility");
+    // Simplify this method to avoid depending on iOS services
+    async retryWithChunkedUpload(audioBlob, metadata, retryCount) {
+        console.log("Using format-based retry instead of chunked upload");
         
-        // For now, we'll just repackage the blob with a different MIME type
-        // In a more advanced implementation, we could use Web Audio API to transcode
-        try {
-            return new Blob([audioBlob], { type: 'audio/mpeg' });
-        } catch (e) {
-            console.error("Error converting iOS audio:", e);
-            throw e;
-        }
+        // Use the format-based retry instead
+        return this.retryTranscriptionWithFallback(audioBlob, metadata, retryCount);
     }
-
+    
     // Get last transcription error details
     getLastErrorDetails() {
         return this.transcriptionError || { message: "No error information available" };
