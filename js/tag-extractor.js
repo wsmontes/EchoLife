@@ -106,6 +106,8 @@ Return a JSON array of objects with "text" and "confidence" properties.`
                 // Merge new tags into our tagConfidence store
                 tags = this.trackTagConfidence(tags);
             }
+            // Log each tag
+            tags.forEach(tag => console.log(tag));
             return tags;
         } catch (error) {
             console.error('Error extracting tags:', error);
@@ -253,6 +255,8 @@ Append a question mark to uncertain terms. Be more conservative with confidence 
             
             // Merge into our overall tagConfidence store with uncertainty handling
             tags = this.trackTagConfidenceWithUncertainty(tags);
+            // Log each tag
+            tags.forEach(tag => console.log(tag));
             return tags;
         } catch (error) {
             console.error('Real-time tag extraction error:', error);
