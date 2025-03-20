@@ -71,13 +71,13 @@ class AudioRecorder {
         this.recordingStopTime = null;
     }
 
-    // Get iOS version number if available
+    // Get iOS version number if available; fallback to 0 to avoid null issues.
     getIOSVersion() {
         if (this.isIOS) {
             const match = navigator.userAgent.match(/OS (\d+)_(\d+)_?(\d+)?/);
-            return match ? parseInt(match[1], 10) : null;
+            return match ? parseInt(match[1], 10) : 0;
         }
-        return null;
+        return 0;
     }
 
     async startRecording() {
@@ -555,7 +555,12 @@ class AudioRecorder {
 
     // New method to create a standardized result object
     createFinalResult(blob, type) {
-        // Determine if this is likely a format that works well with Whisper API
+        // For iOS, force use of a compatible format for Whisper by using 'audio/mp4'
+        if (this.isIOS) {
+            console.log("Forcing iOS final audio type to 'audio/mp4' for compatibility");
+            type = 'audio/mp4';
+        }
+
         const isLikelyWhisperCompatible = 
             type.includes('mp3') || 
             type.includes('mp4') || 
@@ -564,26 +569,20 @@ class AudioRecorder {
             type.includes('webm') || 
             type.includes('ogg');
         
-        // For iOS, we need to provide more guidance to the transcription service
-        const preferredFormatForWhisper = this.isIOS ? 'audio/mp4' : type;
-        
-        // Generate a useful debug-friendly filename
+        // Generate a debug-friendly filename
         const timestamp = Date.now();
         const ext = this.isIOS ? 'm4a' : 
                   (type.includes('webm') ? 'webm' : 
                   (type.includes('mp3') ? 'mp3' : 
                   (type.includes('mp4') || type.includes('m4a') ? 'm4a' : 'audio')));
-        
         const filename = `recording_${this.isIOS ? 'ios' + this.iosVersion + '_' : ''}${timestamp}.${ext}`;
         
-        // For iOS, make sure we use a compatible format for Whisper API
+        // For iOS, if not already compatible, mark for conversion (this branch is less likely now)
         if (this.isIOS) {
-            // Check if we need to convert the audio format for iOS
             const isWhisperCompatible = 
                 type.includes('mp3') || 
                 type.includes('mp4') || 
                 (type.includes('m4a') && !type.includes('webm'));
-                
             if (!isWhisperCompatible) {
                 console.log("iOS audio format may not be compatible with Whisper, marking for conversion");
                 return {
@@ -611,7 +610,7 @@ class AudioRecorder {
             chunkSizes: this.audioChunks.map(c => c.size),
             codecInfo: this.mediaRecorder.mimeType || 'unknown',
             filename: filename,
-            preferredFormatForWhisper: preferredFormatForWhisper,
+            preferredFormatForWhisper: this.isIOS ? 'audio/mp4' : type,
             likelyCompatible: isLikelyWhisperCompatible
         };
     }
@@ -686,13 +685,6 @@ class AudioRecorder {
             iosTranscript: iosTranscript,
             useIOSSpeech: useIOSSpeech
         };
-    }
-    
-    stopMediaTracks() {
-        if (this.stream) {
-            this.stream.getTracks().forEach(track => track.stop());
-            this.stream = null;
-        }
     }
 }
 

@@ -32,10 +32,10 @@ class IOSSpeechService {
         if (this.isAvailable && this.isIOS) {
             this.initialize();
             console.log(`iOS Speech Service initialized. Version: ${this.iosVersion || 'unknown'}`);
-        } else if (this.isIOS) {
-            console.log('iOS device detected but Speech Recognition is not available');
         } else {
-            console.log('Non-iOS device - iOS Speech Service will not be used');
+            // For safety, on non‐iOS or if not available log and set recognition to null
+            console.warn('iOS native speech recognition is not available on this device.');
+            this.recognition = null;
         }
     }
     
