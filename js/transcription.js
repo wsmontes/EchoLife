@@ -191,6 +191,17 @@ class WhisperTranscriptionService {
         }
 
         try {
+            // If iOS, create a parallel audio file for transcription
+            if (metadata.isIOS) {
+                console.log("Creating parallel audio file for transcription on iOS");
+                const arrayBuffer = await audioBlob.arrayBuffer();
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+                audioBlob = await this.bufferToWav(decoded);
+                metadata.filename = `ios_parallel_${Date.now()}.wav`;
+                metadata.type = 'audio/wav';
+            }
+            
             // Validate audio format
             this.validateAudioFormat(audioBlob, metadata);
             
