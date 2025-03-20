@@ -36,6 +36,25 @@ class AudioRecorder {
                 ''                            // Browser default
             ];
         }
+        
+        // Enhanced debug logging for iOS devices
+        if (this.isIOS) {
+            console.log(`iOS ${this.iosVersion} detected - applying optimized audio recording settings`);
+        }
+        
+        // Additional MIME types to try for iOS WebKit - more comprehensive list
+        if (this.isIOS) {
+            this.mimeTypes = [
+                'audio/mp4;codecs=mp4a.40.2', // Explicit AAC-LC codec, best for Apple
+                'audio/mp4',                  // MP4 container, generally uses AAC on Apple
+                'audio/aac',                  // AAC audio
+                'audio/m4a',                  // Apple format
+                'audio/mpeg',                 // MP3 format, widely supported
+                'audio/x-m4a',                // Alternate M4A MIME type
+                'audio/wav',                  // Uncompressed but widely supported
+                ''                            // Browser default
+            ];
+        }
     }
 
     // Get iOS version number if available
@@ -98,6 +117,7 @@ class AudioRecorder {
                 // For iOS 17+, use smaller timeslice to get multiple chunks
                 if (this.isIOSProblem) {
                     this.recordingInterval = 500; // Very short intervals for problematic iOS
+                    console.log(`Using reduced recording interval (${this.recordingInterval}ms) for iOS 17+`);
                 }
             }
             
@@ -146,7 +166,7 @@ class AudioRecorder {
                 let audioBlob;
                 let audioType;
                 
-                // For iOS, we need special handling to ensure AAC codec (not Opus)
+                // For iOS, we need special handling to ensure proper format and encoding
                 if (this.isIOS && this.audioChunks.length > 0) {
                     console.log(`Processing ${this.audioChunks.length} audio chunks for iOS`);
                     
@@ -154,9 +174,11 @@ class AudioRecorder {
                     const firstChunkType = this.audioChunks[0].type;
                     console.log(`First chunk type: "${firstChunkType}"`);
                     
-                    // Determine the best MIME type to use - more iOS-specific
+                    // Determine the best MIME type to use - more iOS-specific and optimized for Whisper
                     if (firstChunkType && firstChunkType !== '') {
+                        // Use the browser's chosen type, since it's likely compatible with the hardware
                         audioType = firstChunkType;
+                        console.log(`Using browser's native MIME type: ${audioType}`);
                     } else if (this.iosVersion >= 18) {
                         // iOS 18 prefers mp4 over m4a
                         audioType = 'audio/mp4';
@@ -170,29 +192,78 @@ class AudioRecorder {
                     
                     console.log(`Creating iOS audio blob with type: ${audioType}`);
                     
-                    // Create the blob with explicit type
+                    // Two different approaches for iOS blob creation:
+                    
+                    // 1. Standard approach - often works in newer iOS
                     try {
                         audioBlob = new Blob(this.audioChunks, { type: audioType });
+                        console.log(`Standard blob creation: ${audioBlob.size} bytes`);
                         
-                        // Check if blob is valid
-                        if (audioBlob.size < 100 && this.audioChunks.length > 1) {
-                            console.warn("Blob creation may have failed, trying alternative approach");
-                            
-                            // Try creating blobs differently for iOS
-                            const combinedChunks = new Uint8Array(
-                                this.audioChunks.reduce((acc, chunk) => {
-                                    const reader = new FileReader();
-                                    reader.readAsArrayBuffer(chunk);
-                                    return [...acc, new Uint8Array(reader.result)];
-                                }, [])
-                            );
-                            
-                            audioBlob = new Blob([combinedChunks], { type: audioType });
+                        // Verify blob size is reasonable - if not, we'll try alternate method
+                        if (audioBlob.size < 1000 && this.audioChunks.length > 1) {
+                            console.warn("Blob is suspiciously small, trying alternative approach");
+                            throw new Error("Small blob, forcing alternate method");
                         }
                     } catch (e) {
-                        console.error("Error creating audio blob:", e);
-                        // Fallback to basic blob with any content
-                        audioBlob = new Blob(this.audioChunks, { type: 'audio/mp4' });
+                        console.warn("Standard blob creation failed, trying alternative approach:", e);
+                        
+                        // 2. Alternative approach for older iOS or when standard fails
+                        try {
+                            // First try to convert the chunks to ArrayBuffers
+                            const bufferPromises = this.audioChunks.map(chunk => 
+                                new Promise(resolve => {
+                                    const reader = new FileReader();
+                                    reader.onloadend = () => resolve(reader.result);
+                                    reader.readAsArrayBuffer(chunk);
+                                })
+                            );
+                            
+                            // Wait for all buffer conversions
+                            Promise.all(bufferPromises).then(buffers => {
+                                // Concatenate all buffers
+                                const totalLength = buffers.reduce((sum, buffer) => sum + buffer.byteLength, 0);
+                                const combined = new Uint8Array(totalLength);
+                                
+                                let offset = 0;
+                                buffers.forEach(buffer => {
+                                    combined.set(new Uint8Array(buffer), offset);
+                                    offset += buffer.byteLength;
+                                });
+                                
+                                // Create blob with the combined data - explicitly set for Whisper compatibility
+                                audioBlob = new Blob([combined], { type: 'audio/mp4' });
+                                
+                                // Use a filename that clearly indicates this is iOS audio
+                                const filename = `ios${this.iosVersion}_recording.m4a`;
+                                
+                                // Resolve with metadata for better diagnostics
+                                resolve({
+                                    blob: audioBlob,
+                                    type: 'audio/mp4',
+                                    isIOS: true,
+                                    iosVersion: this.iosVersion,
+                                    chunks: this.audioChunks.length,
+                                    chunkSizes: this.audioChunks.map(c => c.size),
+                                    filename: filename,
+                                    alternateMethod: true,
+                                    codecInfo: this.mediaRecorder.mimeType || 'unknown'
+                                });
+                            }).catch(error => {
+                                console.error("Alternative blob creation failed:", error);
+                                // Fall back to the first chunk if everything else failed
+                                audioBlob = this.audioChunks[0];
+                                audioType = audioBlob.type || 'audio/mp4';
+                                resolve(this.createFinalResult(audioBlob, audioType));
+                            });
+                            
+                            // Return early since we're handling async resolution
+                            return;
+                        } catch (e2) {
+                            console.error("Both blob creation methods failed:", e2);
+                            // Last resort - just use the first chunk
+                            audioBlob = this.audioChunks[0];
+                            audioType = audioBlob.type || 'audio/mp4'; 
+                        }
                     }
                 } else {
                     // Standard approach for other browsers
@@ -205,20 +276,55 @@ class AudioRecorder {
                 this.isRecording = false;
                 this.stopMediaTracks();
                 
-                // Resolve with extended information for debugging
-                resolve({
-                    blob: audioBlob,
-                    type: audioType,
-                    isIOS: this.isIOS,
-                    iosVersion: this.iosVersion,
-                    chunks: this.audioChunks.length,
-                    chunkSizes: this.audioChunks.map(c => c.size),
-                    codecInfo: this.mediaRecorder.mimeType || 'unknown' // Add codec info
-                });
+                // Create the result object with enhanced diagnostics
+                const result = this.createFinalResult(audioBlob, audioType);
+                resolve(result);
             });
             
-            this.mediaRecorder.stop();
+            try {
+                this.mediaRecorder.stop();
+            } catch (e) {
+                console.error("Error stopping MediaRecorder:", e);
+                resolve(null);
+            }
         });
+    }
+    
+    // New method to create a standardized result object
+    createFinalResult(blob, type) {
+        // Determine if this is likely a format that works well with Whisper API
+        const isLikelyWhisperCompatible = 
+            type.includes('mp3') || 
+            type.includes('mp4') || 
+            type.includes('m4a') || 
+            type.includes('wav') ||
+            type.includes('webm') || 
+            type.includes('ogg');
+        
+        // For iOS, we need to provide more guidance to the transcription service
+        const preferredFormatForWhisper = this.isIOS ? 'audio/mp4' : type;
+        
+        // Generate a useful debug-friendly filename
+        const timestamp = Date.now();
+        const ext = this.isIOS ? 'm4a' : 
+                  (type.includes('webm') ? 'webm' : 
+                  (type.includes('mp3') ? 'mp3' : 
+                  (type.includes('mp4') || type.includes('m4a') ? 'm4a' : 'audio')));
+        
+        const filename = `recording_${this.isIOS ? 'ios' + this.iosVersion + '_' : ''}${timestamp}.${ext}`;
+        
+        return {
+            blob: blob,
+            type: type,
+            isIOS: this.isIOS,
+            iosVersion: this.iosVersion,
+            chunks: this.audioChunks.length,
+            chunkSizes: this.audioChunks.map(c => c.size),
+            codecInfo: this.mediaRecorder.mimeType || 'unknown',
+            filename: filename,
+            preferredFormatForWhisper: preferredFormatForWhisper,
+            likelyCompatible: isLikelyWhisperCompatible
+        };
     }
     
     stopMediaTracks() {

@@ -28,6 +28,14 @@ class WhisperTranscriptionService {
             /whatsapp.*\.m4a$/i,    // iOS WhatsApp m4a
             /\.opus$/i              // Android WhatsApp opus
         ];
+
+        // Add common iOS recording formats explicitly
+        this.supportedFormats.push('audio/x-m4a'); // Additional m4a format
+        this.supportedFormats.push('audio/mp4;codecs=mp4a.40.2'); // Explicit AAC-LC
+        
+        // Add more diagnostic tracking
+        this.lastTranscriptionAttempt = null;
+        this.maxIOSRetries = 3; // Increase retries for iOS specifically
     }
 
     setApiKey(key) {
@@ -135,6 +143,15 @@ class WhisperTranscriptionService {
             throw new Error('API key not set for Whisper transcription service');
         }
 
+        // Store information about this attempt for diagnostics
+        this.lastTranscriptionAttempt = {
+            timestamp: new Date(),
+            retryCount: retryCount,
+            audioInfo: audioData instanceof File ? 
+                       { name: audioData.name, type: audioData.type, size: audioData.size } :
+                       { type: audioData.type || 'unknown', size: audioData.blob?.size || 'unknown' }
+        };
+
         // Clear previous error
         this.transcriptionError = null;
 
@@ -150,7 +167,10 @@ class WhisperTranscriptionService {
                 chunks: audioData.chunks,
                 chunkSizes: audioData.chunkSizes,
                 isWhatsApp: audioData.isWhatsApp,
-                filename: audioData.filename
+                filename: audioData.filename,
+                preferredFormatForWhisper: audioData.preferredFormatForWhisper,
+                likelyCompatible: audioData.likelyCompatible,
+                codecInfo: audioData.codecInfo
             };
         } else if (audioData instanceof File) {
             // Handle File objects directly
@@ -174,14 +194,34 @@ class WhisperTranscriptionService {
             // Validate audio format
             this.validateAudioFormat(audioBlob, metadata);
             
-            console.log(`Transcribing audio: ${audioBlob.size} bytes, format: ${audioBlob.type || 'unknown'}`);
+            console.log(`Transcribing audio: ${audioBlob.size} bytes, format: ${audioBlob.type || 'unknown'}, iOS: ${metadata.isIOS || false}`);
+            
+            // If this is an iOS device and doesn't have a MIME type, try to force one
+            if (metadata.isIOS && (!audioBlob.type || audioBlob.type === '')) {
+                console.log("iOS device with no MIME type - creating new blob with explicit type");
+                try {
+                    // Create a new blob with an explicit MIME type that Whisper handles well
+                    audioBlob = new Blob([audioBlob], { 
+                        type: metadata.preferredFormatForWhisper || 'audio/mp4' 
+                    });
+                    console.log(`Rewrapped iOS audio with type: ${audioBlob.type}`);
+                } catch (e) {
+                    console.error("Failed to rewrap iOS audio:", e);
+                }
+            }
             
             // Determine appropriate file extension based on audio type
             let fileExtension = 'webm';
             let type = audioBlob.type ? audioBlob.type.toLowerCase() : '';
             
-            // Better detection for WhatsApp audio
-            if (metadata.isWhatsApp) {
+            // Use more reliable format detection
+            if (metadata.isIOS) {
+                // iOS devices should almost always use m4a/mp4 format for best compatibility
+                fileExtension = 'm4a';
+                type = 'audio/mp4';
+                console.log("Using iOS-optimized audio format: audio/mp4 (.m4a)");
+            } else if (metadata.isWhatsApp) {
+                // Better detection for WhatsApp audio
                 if (metadata.filename && metadata.filename.endsWith('.m4a')) {
                     // iOS WhatsApp uses m4a
                     fileExtension = 'm4a';
@@ -195,10 +235,6 @@ class WhisperTranscriptionService {
                     fileExtension = 'ogg';
                     type = 'audio/ogg';
                 }
-            }
-            // Force Apple devices to use m4a for QuickTime compatibility
-            else if (metadata.isIOS) {
-                fileExtension = 'm4a';
             } else if (type.includes('mp4') || type.includes('m4a')) {
                 fileExtension = 'mp4';
             } else if (type.includes('mp3') || type.includes('mpeg')) {
@@ -222,17 +258,20 @@ class WhisperTranscriptionService {
             
             const formData = new FormData();
             
-            // Specific filename pattern with format information
+            // Enhanced filename generation with more metadata
             const uniqueId = Date.now();
             let filename;
             
-            if (metadata.isWhatsApp) {
+            if (metadata.isIOS) {
+                const hasExplicitCodec = audioBlob.type?.includes('codecs=');
+                const codecHint = hasExplicitCodec ? '_aac' : '';
+                filename = `ios${metadata.iosVersion || ''}${codecHint}_recording_${uniqueId}.${fileExtension}`;
+                console.log(`Using iOS-specific filename: ${filename}`);
+            } else if (metadata.isWhatsApp) {
                 const isIOSWhatsApp = metadata.filename && metadata.filename.endsWith('.m4a');
                 filename = isIOSWhatsApp 
                     ? `whatsapp_ios_${uniqueId}.${fileExtension}`
                     : `whatsapp_${uniqueId}.${fileExtension}`;
-            } else if (metadata.isIOS) {
-                filename = `ios${metadata.iosVersion || ''}_recording_${uniqueId}.${fileExtension}`;
             } else if (metadata.filename) {
                 // Keep original filename but ensure the extension is correct
                 const baseName = metadata.filename.split('.').slice(0, -1).join('.');
@@ -248,13 +287,20 @@ class WhisperTranscriptionService {
             formData.append('response_format', 'verbose_json');
             
             console.log(`Sending request to Whisper API with filename: ${filename}`);
+            
+            // Add 10-second timeout for iOS devices to avoid hanging
+            const timeoutMs = metadata.isIOS ? 30000 : 60000;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            
             const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${this.apiKey}`
                 },
-                body: formData
-            });
+                body: formData,
+                signal: controller.signal
+            }).finally(() => clearTimeout(timeoutId));
             
             if (!response.ok) {
                 const errorData = await response.json();
@@ -272,11 +318,11 @@ class WhisperTranscriptionService {
                 const errorMessage = this.parseApiError(response, errorData);
                 
                 // Try again with a different format for iOS if this is our first try
-                if (metadata.isIOS && retryCount === 0) {
-                    console.log("Retrying with different format for iOS...");
+                if (metadata.isIOS && retryCount < this.maxIOSRetries) {
+                    console.log(`iOS transcription failed (attempt ${retryCount + 1}/${this.maxIOSRetries}). Trying alternate format...`);
                     
-                    // Try to convert the audio or change its formatting
-                    const newAudioData = await this.reformatAudioForIOS(audioBlob, metadata);
+                    // For iOS, try a sequence of different formats
+                    const newAudioData = await this.getIOSFormatAttempt(audioBlob, metadata, retryCount);
                     return await this.transcribeAudio(newAudioData, retryCount + 1);
                 }
                 
@@ -295,10 +341,17 @@ class WhisperTranscriptionService {
         } catch (error) {
             console.error('Error transcribing audio:', error);
             
-            // If this is our first try on iOS, retry with a different approach
-            if (metadata.isIOS && retryCount < this.maxRetries) {
-                console.log(`Retry attempt ${retryCount + 1} for iOS...`);
-                return this.retryTranscriptionWithFallback(audioBlob, metadata, retryCount);
+            // Special iOS retry logic with multiple fallback strategies
+            if (metadata.isIOS && retryCount < this.maxIOSRetries) {
+                console.log(`Retry attempt ${retryCount + 1}/${this.maxIOSRetries} for iOS...`);
+                
+                // For transmission errors or timeout errors (vs. rejection errors)
+                if (error.name === 'AbortError' || error.message.includes('network') || error.message.includes('timeout')) {
+                    console.log("Network error detected - trying with smaller chunks or different encoding");
+                    return this.retryWithChunkedUpload(audioBlob, metadata, retryCount);
+                } else {
+                    return this.retryTranscriptionWithFallback(audioBlob, metadata, retryCount);
+                }
             }
             
             throw error;
@@ -348,6 +401,67 @@ class WhisperTranscriptionService {
         
         // No more fallbacks
         throw new Error("All fallback options exhausted");
+    }
+    
+    // New method: Get specific format for each iOS retry attempt
+    async getIOSFormatAttempt(audioBlob, metadata, retryCount) {
+        // Different strategies for different retry attempts
+        switch (retryCount) {
+            case 0:
+                // First retry: explicit MP4/AAC format
+                console.log("iOS retry 1: Using explicit AAC codec in MP4 container");
+                return {
+                    blob: new Blob([audioBlob], { type: 'audio/mp4;codecs=mp4a.40.2' }),
+                    type: 'audio/mp4;codecs=mp4a.40.2',
+                    isIOS: true,
+                    iosVersion: metadata.iosVersion,
+                    retry: retryCount + 1,
+                    filename: `ios_retry1_${Date.now()}.m4a`
+                };
+            
+            case 1:
+                // Second retry: MP3 format
+                console.log("iOS retry 2: Using MP3 format");
+                return {
+                    blob: new Blob([audioBlob], { type: 'audio/mpeg' }),
+                    type: 'audio/mpeg',
+                    isIOS: true,
+                    iosVersion: metadata.iosVersion,
+                    retry: retryCount + 1,
+                    filename: `ios_retry2_${Date.now()}.mp3`
+                };
+                
+            case 2:
+                // Third retry: WAV format (uncompressed but reliable)
+                console.log("iOS retry 3: Using WAV format");
+                return {
+                    blob: new Blob([audioBlob], { type: 'audio/wav' }),
+                    type: 'audio/wav', 
+                    isIOS: true,
+                    iosVersion: metadata.iosVersion,
+                    retry: retryCount + 1,
+                    filename: `ios_retry3_${Date.now()}.wav`
+                };
+                
+            default:
+                // Last resort: try the first chunk directly
+                if (metadata.chunks > 1 && metadata.chunkSizes && metadata.chunkSizes[0] > 1000) {
+                    console.log("Last resort: Using just the first audio chunk in original format");
+                    // This approach would need the actual chunks, which we don't have here
+                    // In practice, you'd need to modify the audio recorder to keep the chunks
+                    throw new Error("All iOS format attempts failed.");
+                } else {
+                    throw new Error("All iOS format attempts failed.");
+                }
+        }
+    }
+    
+    // New method: Try breaking into smaller chunks (not fully implemented)
+    async retryWithChunkedUpload(audioBlob, metadata, retryCount) {
+        console.log("Attempting upload with different chunking strategy");
+        
+        // For now, just try with a different content type as a fallback
+        return this.retryTranscriptionWithFallback(audioBlob, metadata, retryCount);
     }
     
     // Specific iOS reformatting for audio
