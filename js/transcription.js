@@ -361,11 +361,34 @@ class WhisperTranscriptionService {
     // Retry with fallback approaches for iOS
     async retryTranscriptionWithFallback(audioBlob, metadata, retryCount) {
         try {
-            // Try a different approach based on retry count
+            // For iOS devices, prioritize using on-device speech recognition
+            if (metadata.isIOS && window.iosSpeechService && window.iosSpeechService.isAvailable) {
+                console.log("Whisper API failed for iOS. Checking if we have iOS Speech transcript available");
+                
+                // See if we have a transcript from iOS speech recognition
+                const iosTranscript = window.iosSpeechService.getCurrentTranscript()?.final;
+                
+                if (iosTranscript && iosTranscript.trim().length > 10) {
+                    console.log("Using iOS native speech recognition as fallback");
+                    return iosTranscript;
+                }
+            }
+            
+            // If iOS speech transcript isn't available, try alternative formats
             const newAudioData = await this.getAlternativeAudioFormat(audioBlob, metadata, retryCount);
             return await this.transcribeAudio(newAudioData, retryCount + 1);
         } catch (error) {
             console.error(`Fallback ${retryCount + 1} failed:`, error);
+            
+            // Last chance - check if we have browser transcript
+            if (metadata.isIOS && window.iosSpeechService) {
+                const partial = window.iosSpeechService.getCurrentTranscript()?.combined;
+                if (partial && partial.length > 5) {
+                    console.log("Using partial iOS speech transcript as last resort");
+                    return partial;
+                }
+            }
+            
             throw new Error(
                 `Transcription failed despite multiple attempts. Latest error: ${error.message}. ` +
                 `For iOS devices, try using the audio upload option instead of recording directly.`
@@ -489,6 +512,20 @@ class WhisperTranscriptionService {
         };
     }
     
+    // New method to convert iOS audio to a more compatible format
+    async convertAudioForIOS(audioBlob) {
+        console.log("Converting iOS audio to MP3 format for better compatibility");
+        
+        // For now, we'll just repackage the blob with a different MIME type
+        // In a more advanced implementation, we could use Web Audio API to transcode
+        try {
+            return new Blob([audioBlob], { type: 'audio/mpeg' });
+        } catch (e) {
+            console.error("Error converting iOS audio:", e);
+            throw e;
+        }
+    }
+
     // Get last transcription error details
     getLastErrorDetails() {
         return this.transcriptionError || { message: "No error information available" };

@@ -477,8 +477,49 @@ document.addEventListener('DOMContentLoaded', () => {
                         currentTranscript = result.iosTranscript;
                         transcriptionSource = "ios";
                         console.log("Using iOS native speech recognition result:", currentTranscript);
+                    } else if (audioRecorder.isIOS) {
+                        // For iOS devices, try to use the iOS speech recognition first
+                        try {
+                            const iosTranscript = window.iosSpeechService?.getCurrentTranscript()?.final;
+                            if (iosTranscript && iosTranscript.trim().length > 10) {
+                                console.log("Using iOS native speech recognition transcript:", iosTranscript);
+                                currentTranscript = iosTranscript;
+                                transcriptionSource = "ios";
+                            } else {
+                                // Fall back to Whisper if iOS speech didn't provide good results
+                                console.log("iOS speech transcript unavailable or too short, trying Whisper API");
+                                currentTranscript = await transcriptionService.transcribeAudio(audioResult);
+                                transcriptionSource = "whisper";
+                            }
+                        } catch (iosError) {
+                            console.error("iOS transcription methods failed:", iosError);
+                            
+                            // Fall back to saved transcript if available
+                            if (savedTranscript && savedTranscript.trim().length > 10) {
+                                console.log("Using saved transcript as fallback for iOS:", savedTranscript);
+                                currentTranscript = savedTranscript.trim();
+                                transcriptionSource = "saved";
+                            } else {
+                                // Show specific message for iOS users if transcription fails
+                                let errorMessage = "Transcription failed on your iOS device. ";
+                                errorMessage += "For more reliable results, please try the upload option below instead.";
+                                
+                                // Highlight the upload area
+                                const uploadArea = document.querySelector('.audio-drop-area');
+                                if (uploadArea) {
+                                    uploadArea.style.borderColor = '#ff5722';
+                                    uploadArea.style.backgroundColor = 'rgba(255, 87, 34, 0.05)';
+                                    setTimeout(() => {
+                                        uploadArea.style.borderColor = '';
+                                        uploadArea.style.backgroundColor = '';
+                                    }, 5000);
+                                }
+                                
+                                throw new Error(errorMessage);
+                            }
+                        }
                     } else {
-                        // For non-iOS devices, try Whisper API first but with better fallback to browser transcript
+                        // For non-iOS devices, use standard approach
                         try {
                             console.log("Attempting Whisper API transcription...");
                             currentTranscript = await transcriptionService.transcribeAudio(audioResult);

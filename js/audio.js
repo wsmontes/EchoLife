@@ -576,6 +576,32 @@ class AudioRecorder {
         
         const filename = `recording_${this.isIOS ? 'ios' + this.iosVersion + '_' : ''}${timestamp}.${ext}`;
         
+        // For iOS, make sure we use a compatible format for Whisper API
+        if (this.isIOS) {
+            // Check if we need to convert the audio format for iOS
+            const isWhisperCompatible = 
+                type.includes('mp3') || 
+                type.includes('mp4') || 
+                (type.includes('m4a') && !type.includes('webm'));
+                
+            if (!isWhisperCompatible) {
+                console.log("iOS audio format may not be compatible with Whisper, marking for conversion");
+                return {
+                    blob: blob,
+                    type: type,
+                    isIOS: this.isIOS,
+                    iosVersion: this.iosVersion,
+                    chunks: this.audioChunks.length,
+                    chunkSizes: this.audioChunks.map(c => c.size),
+                    codecInfo: this.mediaRecorder?.mimeType || 'unknown',
+                    filename: `ios${this.iosVersion}_recording_${timestamp}.m4a`, 
+                    preferredFormatForWhisper: 'audio/mp4',
+                    needsConversion: true,
+                    likelyCompatible: false
+                };
+            }
+        }
+        
         return {
             blob: blob,
             type: type,
@@ -606,30 +632,37 @@ class AudioRecorder {
     
     // New method to record audio with the appropriate transcription method
     async startRecordingWithTranscription(callbacks = {}) {
-        // For iOS devices, use the iOS speech recognition service if available
-        if (this.isIOS && this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable) {
-            const success = await this.startRecording();
-            if (success) {
-                // Set up callbacks for iOS speech service
-                if (callbacks.onTranscriptUpdate) {
-                    window.iosSpeechService.setTranscriptUpdateCallback(callbacks.onTranscriptUpdate);
+        // For iOS devices, prioritize using the iOS speech recognition service
+        if (this.isIOS) {
+            // Always try to use iOS native speech recognition first on iOS devices
+            if (window.iosSpeechService && window.iosSpeechService.isAvailable) {
+                const success = await this.startRecording();
+                if (success) {
+                    // Set up callbacks for iOS speech service
+                    if (callbacks.onTranscriptUpdate) {
+                        window.iosSpeechService.setTranscriptUpdateCallback(callbacks.onTranscriptUpdate);
+                    }
+                    if (callbacks.onFinalTranscript) {
+                        window.iosSpeechService.setFinalTranscriptCallback(callbacks.onFinalTranscript);
+                    }
+                    if (callbacks.onError) {
+                        window.iosSpeechService.setErrorCallback(callbacks.onError);
+                    }
+                    
+                    // Start iOS speech recognition
+                    window.iosSpeechService.startListening();
+                    this.useIOSSpeech = true;
+                    return true;
                 }
-                if (callbacks.onFinalTranscript) {
-                    window.iosSpeechService.setFinalTranscriptCallback(callbacks.onFinalTranscript);
-                }
-                if (callbacks.onError) {
-                    window.iosSpeechService.setErrorCallback(callbacks.onError);
-                }
-                
-                // Start iOS speech recognition
-                window.iosSpeechService.startListening();
-                return true;
+                return success;
+            } else {
+                console.log("iOS device detected but native speech recognition unavailable");
+                this.useIOSSpeech = false;
             }
-            return success;
-        } else {
-            // For non-iOS devices, just start regular recording
-            return this.startRecording();
         }
+        
+        // For non-iOS devices or if iOS speech failed, use regular recording
+        return this.startRecording();
     }
 
     async stopRecordingWithTranscription() {
