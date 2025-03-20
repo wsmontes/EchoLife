@@ -190,7 +190,12 @@ document.addEventListener('DOMContentLoaded', () => {
             window.speechRecognition = new SpeechRecognition();
             window.speechRecognition.continuous = true;
             window.speechRecognition.interimResults = true;
-            window.speechRecognition.lang = 'en-US';
+            
+            // Use the selected language - get from translation controller if available
+            const language = window.translationController ? 
+                window.translationController.getSettings().language : 'en-US';
+            window.speechRecognition.lang = language;
+            console.log(`Speech recognition initialized with language: ${language}`);
             
             // Add tracking for speech recognition health
             window.lastSpeechRecognitionEvent = Date.now();
@@ -1480,4 +1485,35 @@ Both subtitle formats are provided for maximum compatibility.`);
         processingIndicator.style.display = 'none';
     }
 }
+
+// Setup event listener for translation settings changes
+window.addEventListener('translationSettingsChanged', (e) => {
+    const settings = e.detail;
+    console.log('Translation settings changed:', settings);
+    
+    // Update speech recognition language if active
+    if (window.speechRecognition) {
+        // Use the UI language for speech recognition (what we're listening for)
+        window.speechRecognition.lang = settings.language;
+        console.log(`Speech recognition language updated to: ${settings.language}`);
+        
+        // Restart speech recognition if it's active
+        if (window.speechRecognitionActive && audioRecorder.isRecording) {
+            try {
+                window.speechRecognition.stop();
+                setTimeout(() => {
+                    window.speechRecognition.start();
+                }, 300);
+                console.log("Restarted speech recognition with new language settings");
+            } catch (e) {
+                console.error("Error restarting speech recognition after language change:", e);
+            }
+        }
+    }
+    
+    // Update iOS speech service language if available
+    if (window.iosSpeechService && window.iosSpeechService.isAvailable) {
+        window.iosSpeechService.setLanguage(settings.language);
+    }
+});
 });

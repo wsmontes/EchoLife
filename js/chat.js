@@ -3,10 +3,16 @@ class ChatService {
         this.apiKey = null;
         this.messages = [];
         this.conversationMode = false;
+        this.language = localStorage.getItem('echolife_language') || 'en-US';
     }
 
     setApiKey(key) {
         this.apiKey = key;
+    }
+    
+    setLanguage(language) {
+        this.language = language;
+        console.log(`Chat service language set to: ${language}`);
     }
 
     addMessage(role, content) {
@@ -26,9 +32,27 @@ class ChatService {
         
         // If enabling conversation mode and no system message exists, add the instruction
         if (enabled && !this.messages.some(m => m.role === 'system')) {
+            const isPortuguese = this.language === 'pt-BR';
+            
             this.messages.unshift({
                 role: 'system',
-                content: `You are an engaged, thoughtful conversation partner who listens carefully.
+                content: isPortuguese ? 
+                `Você é um parceiro de conversa atencioso e reflexivo que ouve cuidadosamente.
+                Ao responder ao usuário, demonstre compreensão genuína da mensagem dele e mostre interesse autêntico.
+                Após reconhecer brevemente o que foi compartilhado, concentre-se em fazer UMA pergunta específica e perspicaz sobre algum aspecto do que foi mencionado.
+                Sua pergunta deve:
+                - Ser específica em vez de genérica
+                - Mostrar que você realmente pensou sobre o que foi compartilhado
+                - Explorar um ângulo interessante que eles podem não ter considerado
+                - Soar natural, como o que um amigo interessado perguntaria
+                - Não ser condescendente ou excessivamente formal
+                
+                Seu tom deve ser conversacional e genuíno. Inclua uma pequena quantidade de seus próprios pensamentos ou perspectivas para criar um fluxo natural,
+                mas concentre-se principalmente em extrair mais do usuário através de sua pergunta cuidadosa.
+                
+                Se a entrada do usuário foi transcrita de áudio, responda como se estivesse tendo uma conversa natural de ida e volta.` :
+                
+                `You are an engaged, thoughtful conversation partner who listens carefully.
                 When responding to the user, demonstrate genuine understanding of their message and show authentic interest.
                 After briefly acknowledging what they've shared, focus on asking ONE specific, insightful question about some aspect of what they've mentioned.
                 Your question should:
@@ -51,6 +75,10 @@ class ChatService {
             throw new Error('API key not set for Chat service');
         }
 
+        // Get current language
+        const language = options.language || this.language || 'en-US';
+        const isPortuguese = language === 'pt-BR';
+        
         this.addMessage('user', content);
         
         // Prepare messages for this request
@@ -63,7 +91,14 @@ class ChatService {
             // Add specific instruction for this message to ensure a conversational response with a question
             messages.push({
                 role: 'system',
-                content: `Respond to the user's message in a conversational, engaged manner. 
+                content: isPortuguese ?
+                `Responda à mensagem do usuário de maneira conversacional e engajada. 
+                Primeiro, reconheça brevemente o que ele compartilhou, adicionando uma pequena quantidade de sua própria perspectiva.
+                Em seguida, faça UMA pergunta específica e reflexiva sobre algo interessante da mensagem dele.
+                Sua resposta deve ser natural e fluida, como duas pessoas em conversa.
+                Não seja robótico ou excessivamente formal - fale como uma pessoa real que está genuinamente interessada.` :
+                
+                `Respond to the user's message in a conversational, engaged manner. 
                 First, briefly acknowledge what they shared, adding a small amount of your own perspective.
                 Then ask ONE specific, thoughtful question about something interesting from their message.
                 Your response should be natural and fluid, like two people in conversation.

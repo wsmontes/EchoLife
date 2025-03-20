@@ -55,7 +55,11 @@ class IOSSpeechService {
             // Configure recognition
             this.recognition.continuous = true;
             this.recognition.interimResults = true;
-            this.recognition.lang = 'en-US'; // Default to English
+            
+            // Get the user's language preference
+            const userLanguage = localStorage.getItem('echolife_language') || 'en-US';
+            this.recognition.lang = userLanguage; // Set to the user's preferred language
+            
             this.recognition.maxAlternatives = 1;
             
             // Set up event handlers
@@ -63,7 +67,7 @@ class IOSSpeechService {
             this.recognition.onerror = this.handleError.bind(this);
             this.recognition.onend = this.handleEnd.bind(this);
             
-            console.log("iOS Speech Recognition initialized successfully");
+            console.log(`iOS Speech Recognition initialized with language: ${userLanguage}`);
         } catch (e) {
             console.error("Failed to initialize iOS Speech Recognition:", e);
             this.isAvailable = false;
@@ -287,6 +291,31 @@ class IOSSpeechService {
             interim: this.interimTranscript,
             combined: this.finalTranscript + this.interimTranscript
         };
+    }
+    
+    // Add method to update recognition language
+    setLanguage(languageCode) {
+        if (this.recognition) {
+            this.recognition.lang = languageCode;
+            console.log(`iOS Speech Recognition language set to: ${languageCode}`);
+            
+            // Restart recognition if it's active to apply the new language
+            if (this.isListening && this.recognitionInProgress) {
+                try {
+                    this.recognition.stop();
+                    setTimeout(() => {
+                        try {
+                            this.recognition.start();
+                            console.log('Restarted iOS Speech Recognition with new language');
+                        } catch (e) {
+                            console.error('Error starting iOS Speech Recognition after language change:', e);
+                        }
+                    }, 300);
+                } catch (e) {
+                    console.error('Error stopping iOS Speech Recognition for language change:', e);
+                }
+            }
+        }
     }
 }
 

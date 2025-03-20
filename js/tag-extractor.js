@@ -34,15 +34,30 @@ class TagExtractor {
         return "other";
     }
     
-    async extractTags(text, maxTags = 8, useContext = true) {
+    async extractTags(text, maxTags = 8, useContext = true, language = null) {
         if (!this.apiKey) {
             throw new Error('API key not set for tag extraction');
         }
         if (!text || text.trim().length < 10) {
             return [{text: 'Too short', confidence: 'low', count: 1, group: "other"}];
         }
+        
+        // Get the current app language and translation settings
+        if (!language) {
+            // Get language from translation controller if available
+            if (window.translationController) {
+                const settings = window.translationController.getSettings();
+                // Use the actual language of the text, which depends on translation setting
+                language = settings.translateEnabled ? settings.targetLanguage : settings.language;
+            } else {
+                language = localStorage.getItem('echolife_language') || 'en-US';
+            }
+        }
+        
         try {
             const contextPrompt = useContext ? this.getContextPrompt() : "";
+            const isPortuguese = language === 'pt-BR';
+            
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -54,10 +69,16 @@ class TagExtractor {
                     messages: [
                         {
                             role: 'system',
-                            content: `Extract ${maxTags} key tags, contexts, or concepts from the following text. 
-${contextPrompt}
-For each tag, assess its confidence level (high, medium, or low) based on how clearly it relates to the text.
-Return a JSON array of objects with "text" and "confidence" properties.`
+                            content: `${isPortuguese ? 
+                                `Extraia ${maxTags} tags, contextos ou conceitos chave do seguinte texto.
+                                ${contextPrompt}
+                                Para cada tag, avalie seu nível de confiança (alto, médio ou baixo) com base em quão claramente ela se relaciona com o texto.
+                                Retorne um array JSON de objetos com propriedades "text" e "confidence".` :
+                                
+                                `Extract ${maxTags} key tags, contexts, or concepts from the following text. 
+                                ${contextPrompt}
+                                For each tag, assess its confidence level (high, medium, or low) based on how clearly it relates to the text.
+                                Return a JSON array of objects with "text" and "confidence" properties.`}`
                         },
                         {
                             role: 'user',
@@ -75,6 +96,8 @@ Return a JSON array of objects with "text" and "confidence" properties.`
             const data = await response.json();
             const tagResponse = data.choices[0].message.content;
             let tags = [];
+            
+            // Rest of parsing logic remains the same
             try {
                 if (tagResponse.includes('[') && tagResponse.includes(']')) {
                     const jsonString = tagResponse.substring(
@@ -95,6 +118,7 @@ Return a JSON array of objects with "text" and "confidence" properties.`
                     .filter(tag => tag.text && !tag.text.includes('{') && !tag.text.includes('}'))
                     .slice(0, maxTags);
             }
+            
             if (useContext && tags.length > 0) {
                 const contextUpdate = tags.filter(tag => tag.confidence === 'high')
                     .map(tag => tag.text)
@@ -111,7 +135,8 @@ Return a JSON array of objects with "text" and "confidence" properties.`
             return tags;
         } catch (error) {
             console.error('Error extracting tags:', error);
-            return [{text: 'Error extracting tags', confidence: 'low', count: 1, group: "other"}];
+            const errorMessage = language === 'pt-BR' ? 'Erro ao extrair tags' : 'Error extracting tags';
+            return [{text: errorMessage, confidence: 'low', count: 1, group: "other"}];
         }
     }
     
@@ -158,15 +183,30 @@ Return a JSON array of objects with "text" and "confidence" properties.`
         return Array.from(this.tagConfidence.values());
     }
 
-    async extractTagsRealtime(partialText, maxTags = 5) {
+    async extractTagsRealtime(partialText, maxTags = 5, language = null) {
         if (!this.apiKey || !partialText || partialText.trim().length < 5) {
-            return [{text: 'Listening...', confidence: 'low', count: 1, group: "other"}];
+            const placeholderText = language === 'pt-BR' ? 'Ouvindo...' : 'Listening...';
+            return [{text: placeholderText, confidence: 'low', count: 1, group: "other"}];
+        }
+        
+        // Get the current app language and translation settings
+        if (!language) {
+            // Get language from translation controller if available
+            if (window.translationController) {
+                const settings = window.translationController.getSettings();
+                // Use the actual language of the text, which depends on translation setting
+                language = settings.translateEnabled ? settings.targetLanguage : settings.language;
+            } else {
+                language = localStorage.getItem('echolife_language') || 'en-US';
+            }
         }
         
         try {
             // Use context history if available for better continuity
             const contextPrompt = this.contextHistory.length > 0 ? 
                 "Previous context: " + this.contextHistory.slice(-2).join(" ") : "";
+            
+            const isPortuguese = language === 'pt-BR';
             
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
@@ -179,18 +219,32 @@ Return a JSON array of objects with "text" and "confidence" properties.`
                     messages: [
                         {
                             role: 'system',
-                            content: `Extract up to ${maxTags} key topics from this partial speech.
-${contextPrompt}
-For each topic, assess your confidence level based on clarity and context.
-Return a JSON array with objects having:
-- "text": the topic term
-- "confidence": "high", "medium", or "low"
-- "uncertain": true if you're unsure about the meaning/context
+                            content: `${isPortuguese ? 
+                                `Extraia até ${maxTags} tópicos chave deste discurso parcial.
+                                ${contextPrompt}
+                                Para cada tópico, avalie seu nível de confiança com base na clareza e contexto.
+                                Retorne um array JSON com objetos contendo:
+                                - "text": o termo do tópico
+                                - "confidence": "high", "medium", ou "low"
+                                - "uncertain": true se você não tiver certeza sobre o significado/contexto
 
-Example: [{"text": "machine learning", "confidence": "high"}, 
-          {"text": "neural networks?", "confidence": "low", "uncertain": true}]
+                                Exemplo: [{"text": "aprendizado de máquina", "confidence": "high"}, 
+                                          {"text": "redes neurais?", "confidence": "low", "uncertain": true}]
 
-Append a question mark to uncertain terms. Be more conservative with confidence levels during partial speech.`
+                                Adicione um ponto de interrogação a termos incertos. Seja mais conservador com os níveis de confiança durante o discurso parcial.` :
+                                
+                                `Extract up to ${maxTags} key topics from this partial speech.
+                                ${contextPrompt}
+                                For each topic, assess your confidence level based on clarity and context.
+                                Return a JSON array with objects having:
+                                - "text": the topic term
+                                - "confidence": "high", "medium", or "low"
+                                - "uncertain": true if you're unsure about the meaning/context
+
+                                Example: [{"text": "machine learning", "confidence": "high"}, 
+                                          {"text": "neural networks?", "confidence": "low", "uncertain": true}]
+
+                                Append a question mark to uncertain terms. Be more conservative with confidence levels during partial speech.`}`
                         },
                         {
                             role: 'user',
@@ -250,7 +304,8 @@ Append a question mark to uncertain terms. Be more conservative with confidence 
                 }
             } catch (e) {
                 console.error('Error parsing real-time tags:', e);
-                tags = [{text: 'Processing...', confidence: 'low', count: 1, group: "other"}];
+                const processingText = language === 'pt-BR' ? 'Processando...' : 'Processing...';
+                tags = [{text: processingText, confidence: 'low', count: 1, group: "other"}];
             }
             
             // Merge into our overall tagConfidence store with uncertainty handling
@@ -260,7 +315,8 @@ Append a question mark to uncertain terms. Be more conservative with confidence 
             return tags;
         } catch (error) {
             console.error('Real-time tag extraction error:', error);
-            return [{text: 'Listening...', confidence: 'low', count: 1, group: "other"}];
+            const listeningText = language === 'pt-BR' ? 'Ouvindo...' : 'Listening...';
+            return [{text: listeningText, confidence: 'low', count: 1, group: "other"}];
         }
     }
     

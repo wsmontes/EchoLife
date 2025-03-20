@@ -138,15 +138,34 @@ class WhisperTranscriptionService {
         return errorMessage;
     }
 
-    async transcribeAudio(audioData, retryCount = 0) {
+    async transcribeAudio(audioData, retryCount = 0, language = null) {
         if (!this.apiKey) {
             throw new Error('API key not set for Whisper transcription service');
         }
+
+        // Get translation settings
+        const translationSettings = window.translationController ? 
+            window.translationController.getSettings() : 
+            { language: 'en-US', translateEnabled: false };
+        
+        // Determine language for transcription (what language to detect)
+        // If not explicitly passed, use the interface language
+        if (!language) {
+            language = translationSettings.language;
+        }
+        
+        // Determine if we should translate
+        const translateEnabled = translationSettings.translateEnabled;
+        const translateTo = translateEnabled ? 
+            (language === 'pt-BR' ? 'en' : 'pt') : null;
 
         // Store information about this attempt for diagnostics
         this.lastTranscriptionAttempt = {
             timestamp: new Date(),
             retryCount: retryCount,
+            language: language,
+            translateEnabled: translateEnabled,
+            translateTo: translateTo,
             audioInfo: audioData instanceof File ? 
                        { name: audioData.name, type: audioData.type, size: audioData.size } :
                        { type: audioData.type || 'unknown', size: audioData.blob?.size || 'unknown' }
@@ -205,7 +224,7 @@ class WhisperTranscriptionService {
             // Validate audio format
             this.validateAudioFormat(audioBlob, metadata);
             
-            console.log(`Transcribing audio: ${audioBlob.size} bytes, format: ${audioBlob.type || 'unknown'}`);
+            console.log(`Transcribing audio: ${audioBlob.size} bytes, format: ${audioBlob.type || 'unknown'}, language: ${language}, translate: ${translateEnabled ? translateTo : 'disabled'}`);
             
             // Determine appropriate file extension based on audio type
             let fileExtension = 'webm';
@@ -283,7 +302,19 @@ class WhisperTranscriptionService {
             // Request response_format=verbose_json to get word-level timestamps
             formData.append('response_format', 'verbose_json');
             
-            console.log(`Sending request to Whisper API with filename: ${filename}`);
+            // Add language parameter for better transcription (the source language to detect)
+            const languageCode = language === 'pt-BR' ? 'pt' : 'en';
+            formData.append('language', languageCode);
+            
+            // Add translation parameter if translation is enabled
+            if (translateEnabled && translateTo) {
+                console.log(`Adding translation to ${translateTo}`);
+                formData.append('translate', 'true');
+                // Note: With translate=true, the 'language' parameter still identifies the source language,
+                // but Whisper will translate to English. We set translate=true only when needed.
+            }
+            
+            console.log(`Sending request to Whisper API with filename: ${filename}, language: ${languageCode}, translate: ${translateEnabled}`);
             
             const timeoutMs = 60000;
             const controller = new AbortController();
@@ -353,9 +384,14 @@ class WhisperTranscriptionService {
     }
 
     // New method to test API key and Whisper API access
-    async testWhisperApiAccess() {
+    async testWhisperApiAccess(language = null) {
         if (!this.apiKey) {
             return { success: false, message: 'API key not set' };
+        }
+        
+        // Get the current app language if not specified
+        if (!language) {
+            language = localStorage.getItem('echolife_language') || 'en-US';
         }
         
         try {
@@ -389,15 +425,24 @@ class WhisperTranscriptionService {
                 throw new Error(`API connectivity issue: ${error.error?.message || response.statusText}`);
             }
             
+            // Get success message in the current language
+            const successMsg = language === 'pt-BR' ? 
+                'API da OpenAI está acessível. O Whisper deve funcionar quando você gravar áudio.' : 
+                'OpenAI API is accessible. Whisper should work when you record audio.';
+            
             // If we get here, API access is good
             return { 
                 success: true, 
-                message: 'OpenAI API is accessible. Whisper should work when you record audio.' 
+                message: successMsg 
             };
         } catch (error) {
+            const errorMsg = language === 'pt-BR' ? 
+                `Teste de API falhou: ${error.message}` : 
+                `API test failed: ${error.message}`;
+                
             return { 
                 success: false, 
-                message: `API test failed: ${error.message}`, 
+                message: errorMsg, 
                 error 
             };
         }

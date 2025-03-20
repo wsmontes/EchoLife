@@ -634,3 +634,131 @@ footer {
     font-size: 0.9rem;
     margin-bottom: 15px;
 }
+
+/* Language Controls Styling */
+.language-controls {
+    position: absolute;
+    top: 10px;
+    right: 120px; /* Position to the left of the API key button */
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    z-index: 10;
+}
+
+.language-selector-container {
+    /* Remove absolute positioning */
+    position: relative;
+    top: auto;
+    right: auto;
+}
+
+.language-selector {
+    padding: 6px 10px;
+    border: none;
+    background: var(--secondary-color);
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3e%3cpath d='M7 10l5 5 5-5z'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 16px;
+    padding-right: 28px;
+}
+
+.language-selector:hover {
+    background-color: #6eadb9;
+}
+
+/* Translation Toggle Styling */
+.translation-toggle-container {
+    display: flex;
+    align-items: center;
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 52px;
+    height: 25px;
+    margin-right: 8px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+}
+
+input:checked + .slider {
+    background-color: var(--accent-color);
+}
+
+input:focus + .slider {
+    box-shadow: 0 0 1px var(--accent-color);
+}
+
+input:checked + .slider:before {
+    transform: translateX(26px);
+}
+
+.slider.round {
+    border-radius: 34px;
+}
+
+.slider.round:before {
+    border-radius: 50%;
+}
+
+.toggle-label {
+    font-size: 14px;
+    color: #555;
+    white-space: nowrap;
+}
+
+/* Responsive design adjustments */
+@media (max-width: 768px) {
+    .language-controls {
+        position: relative;
+        top: auto;
+        right: auto;
+        display: flex;
+        justify-content: center;
+        margin-top: 15px;
+    }
+    
+    #editApiKeyButton {
+        position: relative;
+        top: auto;
+        right: auto;
+        margin-top: 10px;
+        width: 100%;
+    }
+}

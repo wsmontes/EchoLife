@@ -17,6 +17,26 @@
         <header>
             <h1>Echo Life</h1>
             <p>Speak and connect with AI</p>
+            <!-- Language controls container -->
+            <div class="language-controls">
+                <!-- Language selector dropdown -->
+                <div class="language-selector-container">
+                    <select id="languageSelector" class="language-selector">
+                        <option value="en-US">English</option>
+                        <option value="pt-BR">Português Brasileiro</option>
+                    </select>
+                </div>
+                
+                <!-- Translation toggle switch -->
+                <div class="translation-toggle-container">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="translationToggle">
+                        <span class="slider round"></span>
+                        <span class="toggle-label" id="translationToggleLabel">Auto-translate</span>
+                    </label>
+                </div>
+            </div>
+            
             <!-- New API Key editing button -->
             <button id="editApiKeyButton" style="position:absolute; top:10px; right:10px; padding:6px 12px; border:none; background: var(--accent-color); color: white; border-radius:4px; cursor:pointer;">
                 Edit API Key
@@ -137,6 +157,8 @@
     </div>
 
     <!-- Scripts - Updated load order -->
+    <script src="js/translations.js"></script>
+    <script src="js/translation-controller.js"></script>
     <script src="js/audio.js"></script>
     <script src="js/ios-speech.js"></script>  <!-- Add the iOS speech service before transcription -->
     <script src="js/transcription.js"></script>
@@ -145,41 +167,6 @@
     <script src="js/audio-handler.js"></script>
     <script src="js/word-cloud.js"></script>
     <script src="js/app.js"></script>
-    <script>
-        // Add diagnostic script for Whisper API testing
-        document.addEventListener('DOMContentLoaded', () => {
-            const testWhisperButton = document.getElementById('testWhisperButton');
-            const testWhisperResult = document.getElementById('testWhisperResult');
-            
-            if (testWhisperButton) {
-                testWhisperButton.addEventListener('click', async () => {
-                    try {
-                        testWhisperButton.disabled = true;
-                        testWhisperButton.textContent = 'Testing...';
-                        testWhisperResult.textContent = '';
-                        testWhisperResult.style.display = 'block';
-                        
-                        // Create and resume AudioContext first on this user interaction
-                        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                        if (audioContext.state === 'suspended') {
-                            await audioContext.resume();
-                        }
-                        
-                        const result = await transcriptionService.testWhisperApiAccess();
-                        
-                        testWhisperResult.textContent = result.message;
-                        testWhisperResult.style.color = result.success ? 'green' : 'red';
-                    } catch (e) {
-                        console.error('Test error:', e);
-                        testWhisperResult.textContent = `Test error: ${e.message}`;
-                        testWhisperResult.style.color = 'red';
-                    } finally {
-                        testWhisperButton.disabled = false;
-                        testWhisperButton.textContent = 'Test Whisper API';
-                    }
-                });
-            }
-        });
-    </script>
+    <script src="js/diagnostic-tools.js"></script> <!-- Add diagnostic tools at the end -->
 </body>
 </html>

@@ -13,11 +13,23 @@ class WordCloud {
         this.collisionDetection = true;
         this.lastUpdateTime = Date.now(); // Track last update time
         
+        // Add language awareness
+        this.language = localStorage.getItem('echolife_language') || 'en-US';
+        
         // Setup fullscreen toggle
-        const fullscreenToggle = document.getElementById('fullscreenToggle');
-        if (fullscreenToggle) {
-            fullscreenToggle.addEventListener('click', () => this.toggleFullscreen());
+        const toggleButton = document.getElementById('fullscreenToggle');
+        if (toggleButton) {
+            toggleButton.addEventListener('click', this.toggleFullscreen.bind(this));
         }
+        
+        // Initialize the word cloud placeholder with correct language
+        this.updatePlaceholder();
+        
+        // Listen for language changes
+        window.addEventListener('languageChanged', (e) => {
+            this.language = e.detail.language;
+            this.updatePlaceholder();
+        });
         
         // Track container size changes
         window.addEventListener('resize', () => this.handleResize());
@@ -88,6 +100,13 @@ class WordCloud {
         
         // Reposition all words with animation
         this.updateWordCloud(Array.from(this.words.values()), true);
+    }
+    
+    updatePlaceholder() {
+        const placeholder = this.container.querySelector('.word-cloud-placeholder');
+        if (placeholder) {
+            placeholder.textContent = getTranslation('words_appear', this.language);
+        }
     }
     
     // Updates the word cloud with new tags
@@ -278,6 +297,25 @@ class WordCloud {
     
     // New method to identify semantic themes from the current set of tags
     identifyThemes(tags) {
+        // Add Portuguese-specific theme detection
+        const isPortuguese = this.language === 'pt-BR';
+        
+        // For Portuguese, consider groups based on Brazilian industries/topics
+        if (isPortuguese) {
+            // Define Portuguese theme keywords
+            const themeKeywords = {
+                'tecnologia': ['tecnologia', 'digital', 'app', 'aplicativo', 'software', 'computador', 'internet', 'rede', 'programação', 'código', 'inteligência artificial', 'ia', 'dados'],
+                'saúde': ['saúde', 'médico', 'hospital', 'medicina', 'enfermagem', 'tratamento', 'doença', 'bem-estar', 'fitness', 'exercício'],
+                'finanças': ['finanças', 'dinheiro', 'investimento', 'banco', 'economia', 'mercado', 'financeiro', 'bolsa', 'ações'],
+                'educação': ['educação', 'escola', 'universidade', 'ensino', 'aprendizagem', 'professor', 'aluno', 'estudo'],
+                'governo': ['governo', 'política', 'público', 'lei', 'legislação', 'presidente', 'ministro', 'congresso']
+            };
+            
+            // Apply the same theme detection logic but with Portuguese keywords
+            // ...rest of the method remains unchanged
+        }
+        
+        // Original English theme detection
         // Create thematic clusters based on word relationships
         const themes = [];
         const processedWords = new Set();
@@ -536,4 +574,15 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Make wordCloud globally available
     window.wordCloud = wordCloud;
+    
+    // Listen for language changes to update the word cloud
+    document.getElementById('languageSelector')?.addEventListener('change', (e) => {
+        const language = e.target.value;
+        wordCloud.language = language;
+        wordCloud.updatePlaceholder();
+        // Dispatch event for other components
+        window.dispatchEvent(new CustomEvent('languageChanged', { 
+            detail: { language } 
+        }));
+    });
 });

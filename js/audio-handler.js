@@ -9,12 +9,23 @@ class AudioHandler {
             'whatsapp_audio.m4a', '.m4a'
         ];
         this.setupComplete = false;
+        // Get current language
+        this.language = localStorage.getItem('echolife_language') || 'en-US';
+        
         // Wait for DOM to be fully loaded before setting up
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => this.setupEventListeners());
         } else {
             this.setupEventListeners();
         }
+        
+        // Listen for language changes
+        window.addEventListener('languageChanged', (e) => {
+            this.language = e.detail.language;
+            if (this.setupComplete) {
+                this.updateDropAreaText();
+            }
+        });
     }
 
     setupEventListeners() {
@@ -55,17 +66,7 @@ class AudioHandler {
         dropArea.className = 'audio-drop-area';
         
         // Create content for drop area with improved messaging
-        dropArea.innerHTML = `
-            <div class="drop-icon">
-                <i class="fas fa-microphone"></i>
-            </div>
-            <div class="drop-text">
-                <p>Drop any audio file here</p>
-                <p>or</p>
-                <p>Click to select a file</p>
-                <p class="supported-formats">MP3, WAV, M4A, AAC, OPUS, OGG (WhatsApp) supported</p>
-            </div>
-        `;
+        dropArea.innerHTML = this.getDropAreaHTML();
         
         // Processing indicator (initially hidden)
         const processingIndicator = document.createElement('div');
@@ -75,7 +76,7 @@ class AudioHandler {
             <div class="processing-animation">
                 <div class="processing-spinner"></div>
             </div>
-            <div class="processing-text">Processing audio...</div>
+            <div class="processing-text">${getTranslation('processing', this.language)}</div>
         `;
         processingIndicator.style.display = 'none';
         
@@ -93,6 +94,46 @@ class AudioHandler {
         this.setupDragAndDropEvents(dropArea);
         
         return dropArea;
+    }
+    
+    getDropAreaHTML() {
+        return `
+            <div class="drop-icon">
+                <i class="fas fa-microphone"></i>
+            </div>
+            <div class="drop-text">
+                <p>${getTranslation('drop_audio', this.language)}</p>
+                <p>${getTranslation('or', this.language)}</p>
+                <p>${getTranslation('click_to_select', this.language)}</p>
+                <p class="supported-formats">${getTranslation('supported_formats', this.language)}</p>
+            </div>
+        `;
+    }
+    
+    updateDropAreaText() {
+        if (this.dropArea) {
+            const dropText = this.dropArea.querySelector('.drop-text');
+            if (dropText) {
+                dropText.innerHTML = `
+                    <p>${getTranslation('drop_audio', this.language)}</p>
+                    <p>${getTranslation('or', this.language)}</p>
+                    <p>${getTranslation('click_to_select', this.language)}</p>
+                    <p class="supported-formats">${getTranslation('supported_formats', this.language)}</p>
+                `;
+            }
+            
+            // Update processing text
+            if (this.processingIndicator) {
+                const processingText = this.processingIndicator.querySelector('.processing-text');
+                if (processingText) {
+                    processingText.textContent = getTranslation('processing', this.language);
+                }
+            }
+        }
+        
+        // Update any error or status messages
+        // Fix: Change updateHistoryUI to updateAudioHistoryUI
+        this.updateAudioHistoryUI();
     }
     
     setupDragAndDropEvents(dropArea) {
@@ -256,8 +297,9 @@ class AudioHandler {
     }
     
     showError(message) {
-        // Show error message in UI
-        alert(`Error: ${message}`);
+        // Show error message in UI with proper translation
+        const errorPrefix = this.language === 'pt-BR' ? 'Erro: ' : 'Error: ';
+        alert(errorPrefix + message);
     }
 
     updateChatUI(response) {
@@ -390,7 +432,7 @@ class AudioHandler {
         if (this.audioHistory.length === 0) {
             const emptyMessage = document.createElement('p');
             emptyMessage.className = 'empty-history-message';
-            emptyMessage.textContent = 'Your uploaded audio history will appear here';
+            emptyMessage.textContent = getTranslation('history_appear', this.language);
             historyContainer.appendChild(emptyMessage);
             return;
         }
@@ -401,11 +443,14 @@ class AudioHandler {
             historyItem.className = 'audio-history-item';
             
             // Format timestamp
-            const timestamp = entry.timestamp.toLocaleString();
+            const timestamp = entry.timestamp.toLocaleString(
+                this.language === 'pt-BR' ? 'pt-BR' : 'en-US'
+            );
             
             // Show different icon if no response yet
             const iconClass = entry.response ? 'fa-file-audio' : 'fa-microphone';
-            const responseStatus = entry.response ? '' : '<span class="no-response-badge">No feedback yet</span>';
+            const responseStatus = entry.response ? '' : 
+                `<span class="no-response-badge">${getTranslation('no_response_yet', this.language)}</span>`;
             
             historyItem.innerHTML = `
                 <div class="history-item-icon">
@@ -489,4 +534,10 @@ let audioHandler;
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Initializing AudioHandler');
     audioHandler = new AudioHandler(chatService);
+    
+    // Listen for language changes
+    document.getElementById('languageSelector')?.addEventListener('change', (e) => {
+        audioHandler.language = e.target.value;
+        audioHandler.updateDropAreaText();
+    });
 });
