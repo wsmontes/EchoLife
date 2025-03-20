@@ -61,6 +61,14 @@ class AudioRecorder {
                 ''                            // Browser default
             ];
         }
+        
+        // Add properties for continuous recording
+        this.continuousRecorder = null;
+        this.continuousChunks = [];
+        this.isContinuousRecording = false;
+        this.continuousStream = null;
+        this.recordingStartTime = null;
+        this.recordingStopTime = null;
     }
 
     // Get iOS version number if available
@@ -75,34 +83,58 @@ class AudioRecorder {
     async startRecording() {
         try {
             this.audioChunks = [];
-            this.stream = await navigator.mediaDevices.getUserMedia({ 
-                audio: {
-                    // Specific constraints that help on iOS
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    // Lower sample rate for better iOS compatibility
-                    sampleRate: this.isIOS ? 44100 : 48000
-                }
-            });
             
-            // Find the best supported MIME type
+            // Get audio stream if we don't already have one
+            if (!this.stream) {
+                this.stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        // Specific constraints that help on iOS
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        // Use appropriate sample rate based on device
+                        sampleRate: this.isIOS ? 44100 : 48000
+                    }
+                });
+            }
+            
+            // Start continuous recording if not already running
+            this.ensureContinuousRecording();
+            
+            // Find the best supported MIME type - simplified approach
             let mimeType = '';
-            for (const type of this.mimeTypes) {
-                if (type && MediaRecorder.isTypeSupported(type)) {
-                    mimeType = type;
-                    console.log(`Found supported MIME type: ${mimeType}`);
-                    break;
+            const browserBasedMimeType = navigator.userAgent.includes('Firefox') ? 
+                'audio/ogg' : 'audio/webm';
+            
+            // For non-iOS devices, use a simplified reliable approach
+            if (!this.isIOS) {
+                if (MediaRecorder.isTypeSupported(browserBasedMimeType)) {
+                    mimeType = browserBasedMimeType;
+                    console.log(`Using standard ${mimeType} for this browser`);
+                } else if (MediaRecorder.isTypeSupported('audio/mp3')) {
+                    mimeType = 'audio/mp3';
+                }
+            } else {
+                // Existing iOS-specific code with MIME type detection
+                for (const type of this.mimeTypes) {
+                    if (type && MediaRecorder.isTypeSupported(type)) {
+                        mimeType = type;
+                        console.log(`Found supported MIME type for iOS: ${mimeType}`);
+                        break;
+                    }
                 }
             }
             
-            // iOS-specific options
+            // Create recorder options
             const options = {};
             if (mimeType) {
                 options.mimeType = mimeType;
             }
             
-            // More specific options for Apple compatibility
-            if (this.isIOS) {
+            // Additional browser-specific settings
+            if (!this.isIOS) {
+                options.audioBitsPerSecond = 128000; // 128kbps for good quality
+            } else {
+                // iOS-specific options
                 // Set preferred audio settings for Apple compatibility
                 options.audioBitsPerSecond = 128000; // 128 kbps for AAC
                 options.audioSampleRate = 44100;     // 44.1 kHz - Apple standard
@@ -127,23 +159,30 @@ class AudioRecorder {
                 }
             }
             
-            console.log(`Using audio format: ${mimeType || 'browser default'} with options:`, options);
+            console.log("Creating MediaRecorder with options:", options);
             this.mediaRecorder = new MediaRecorder(this.stream, options);
             
+            // Save selected MIME type for reference
+            this.selectedMimeType = options.mimeType || 'browser default';
+            
+            // Track recording start time for continuous recording
+            this.recordingStartTime = Date.now();
+            
+            // Improved dataavailable handler with better error reporting
             this.mediaRecorder.addEventListener('dataavailable', event => {
+                console.log(`Received audio chunk: size=${event.data.size} bytes, type=${event.data.type || 'unknown'}`);
+                
                 if (event.data.size > 0) {
                     this.audioChunks.push(event.data);
-                    console.log(`Received audio chunk: ${event.data.size} bytes, type: ${event.data.type}`);
+                } else {
+                    console.warn("Received empty audio chunk");
                 }
             });
             
-            // For iOS 17+, request data more frequently to avoid buffer issues
-            if (this.isIOSProblem) {
-                console.log(`Starting MediaRecorder with timeslice ${this.recordingInterval}ms for iOS compatibility`);
-                this.mediaRecorder.start(this.recordingInterval);
-            } else {
-                this.mediaRecorder.start();
-            }
+            // Record using fixed intervals for consistent chunks
+            const timeslice = 1000; // 1 second chunks work well on most browsers
+            console.log(`Starting MediaRecorder with ${timeslice}ms timeslice`);
+            this.mediaRecorder.start(timeslice);
             
             this.isRecording = true;
             return true;
@@ -160,6 +199,69 @@ class AudioRecorder {
             return false;
         }
     }
+    
+    // New method to ensure continuous recording is running
+    ensureContinuousRecording() {
+        // Skip for iOS devices - they have their own optimizations
+        if (this.isIOS) return;
+        
+        if (!this.isContinuousRecording && this.stream) {
+            try {
+                console.log("Starting continuous background recording");
+                
+                // Create a recorder with the most reliable format for the browser
+                const options = {};
+                const browserBasedMimeType = navigator.userAgent.includes('Firefox') ? 
+                    'audio/ogg' : 'audio/webm';
+                
+                if (MediaRecorder.isTypeSupported(browserBasedMimeType)) {
+                    options.mimeType = browserBasedMimeType;
+                }
+                
+                this.continuousRecorder = new MediaRecorder(this.stream, options);
+                this.continuousChunks = [];
+                
+                this.continuousRecorder.addEventListener('dataavailable', event => {
+                    if (event.data.size > 0) {
+                        this.continuousChunks.push({
+                            data: event.data,
+                            timestamp: Date.now()
+                        });
+                        
+                        // Keep only the last 60 seconds of audio in memory
+                        const maxAgeMs = 60000; // 60 seconds
+                        const cutoffTime = Date.now() - maxAgeMs;
+                        
+                        // Remove chunks older than cutoff time
+                        while (this.continuousChunks.length > 0 && 
+                               this.continuousChunks[0].timestamp < cutoffTime) {
+                            this.continuousChunks.shift();
+                        }
+                    }
+                });
+                
+                // Use a shorter interval for continuous recording
+                this.continuousRecorder.start(500);
+                this.isContinuousRecording = true;
+            } catch (e) {
+                console.error("Failed to start continuous recording:", e);
+                // Continue without continuous recording
+            }
+        }
+    }
+    
+    // Stop continuous recording
+    stopContinuousRecording() {
+        if (this.isContinuousRecording && this.continuousRecorder) {
+            try {
+                this.continuousRecorder.stop();
+                this.isContinuousRecording = false;
+                console.log("Stopped continuous background recording");
+            } catch (e) {
+                console.error("Error stopping continuous recorder:", e);
+            }
+        }
+    }
 
     stopRecording() {
         return new Promise((resolve) => {
@@ -168,11 +270,47 @@ class AudioRecorder {
                 return;
             }
             
+            // Track recording stop time for continuous recording
+            this.recordingStopTime = Date.now();
+            
+            // Add a timeout to ensure we don't wait forever
+            const timeout = setTimeout(() => {
+                console.error("MediaRecorder stop timeout - forcing resolution");
+                
+                // Try to get audio from continuous recording on timeout
+                const continuousAudio = this.extractContinuousAudio();
+                if (continuousAudio) {
+                    console.log("Using continuous recording as fallback on timeout");
+                    resolve(continuousAudio);
+                    return;
+                }
+                
+                // Otherwise fall back to regular chunks if available
+                if (this.audioChunks.length > 0) {
+                    // Try to create a blob from what we have
+                    try {
+                        const audioType = this.selectedMimeType || 'audio/webm';
+                        const audioBlob = new Blob(this.audioChunks, { type: audioType });
+                        resolve(this.createFinalResult(audioBlob, audioType));
+                    } catch (e) {
+                        console.error("Error creating fallback blob:", e);
+                        resolve(null);
+                    }
+                } else {
+                    resolve(null);
+                }
+            }, 5000);
+            
             this.mediaRecorder.addEventListener('stop', () => {
+                clearTimeout(timeout);
+                
+                // Log the chunks we've collected
+                console.log(`Processing ${this.audioChunks.length} audio chunks, total bytes: ${
+                    this.audioChunks.reduce((sum, chunk) => sum + chunk.size, 0)}`);
+                
                 let audioBlob;
                 let audioType;
                 
-                // For iOS, we need special handling to ensure proper format and encoding
                 if (this.isIOS && this.audioChunks.length > 0) {
                     console.log(`Processing ${this.audioChunks.length} audio chunks for iOS`);
                     
@@ -272,30 +410,149 @@ class AudioRecorder {
                         }
                     }
                 } else {
-                    // Standard approach for other browsers
-                    audioType = this.mediaRecorder.mimeType || 'audio/webm';
-                    audioBlob = new Blob(this.audioChunks, { type: audioType });
+                    // Try to use continuous recording first for non-iOS
+                    const continuousAudio = this.extractContinuousAudio();
+                    if (continuousAudio && continuousAudio.blob.size > 1000) {
+                        console.log("Using audio from continuous recording");
+                        audioBlob = continuousAudio.blob;
+                        audioType = continuousAudio.type;
+                    } else {
+                        // Fall back to standard processing if continuous recording failed
+                        console.log("Falling back to standard audio processing");
+                        
+                        // Simplified non-iOS handling - focus on reliability
+                        try {
+                            // Use the MIME type we selected when starting recording
+                            audioType = this.selectedMimeType || 'audio/webm';
+                            console.log(`Creating blob with type: ${audioType}`);
+                            
+                            // Create blob with explicit type
+                            audioBlob = new Blob(this.audioChunks, { type: audioType });
+                            
+                            // Verify we have a valid blob
+                            console.log(`Created audio blob: type=${audioType}, size=${audioBlob.size} bytes`);
+                            
+                            if (audioBlob.size < 100 && this.audioChunks.length > 0) {
+                                // Try with first chunk as fallback
+                                console.warn("Blob suspiciously small, using first chunk directly");
+                                audioBlob = this.audioChunks[0];
+                                audioType = audioBlob.type || audioType;
+                            }
+                        } catch (error) {
+                            console.error("Error creating audio blob:", error);
+                            
+                            // Last resort: use the first chunk if it exists and has size
+                            if (this.audioChunks.length > 0 && this.audioChunks[0].size > 0) {
+                                audioBlob = this.audioChunks[0];
+                                audioType = audioBlob.type || 'audio/webm';
+                                console.log(`Using first chunk as fallback: ${audioBlob.size} bytes`);
+                            } else {
+                                console.error("No valid audio chunks available");
+                                audioBlob = new Blob([], { type: 'audio/webm' });
+                                audioType = 'audio/webm';
+                            }
+                        }
+                    }
                 }
-                
-                console.log(`Created final audio blob: ${audioBlob.type}, size: ${audioBlob.size} bytes`);
                 
                 this.isRecording = false;
                 this.stopMediaTracks();
                 
-                // Create the result object with enhanced diagnostics
+                console.log(`Final audio: type=${audioType}, size=${audioBlob.size} bytes`);
                 const result = this.createFinalResult(audioBlob, audioType);
+                
                 resolve(result);
             });
             
             try {
                 this.mediaRecorder.stop();
             } catch (e) {
+                clearTimeout(timeout);
                 console.error("Error stopping MediaRecorder:", e);
+                
+                // Try to get audio from continuous recording on error
+                const continuousAudio = this.extractContinuousAudio();
+                if (continuousAudio) {
+                    console.log("Using continuous recording as fallback on error");
+                    resolve(continuousAudio);
+                    return;
+                }
+                
                 resolve(null);
             }
         });
     }
     
+    // Extract audio from continuous recording based on start/stop times
+    extractContinuousAudio() {
+        // Skip if we're on iOS (uses its own optimization) or continuous recording isn't available
+        if (this.isIOS || !this.isContinuousRecording || this.continuousChunks.length === 0) {
+            return null;
+        }
+        
+        try {
+            console.log(`Extracting audio from continuous recording (${this.continuousChunks.length} chunks)`);
+            
+            // Filter chunks that fall within our recording window
+            const relevantChunks = this.continuousChunks
+                .filter(chunk => chunk.timestamp >= this.recordingStartTime && 
+                                 chunk.timestamp <= this.recordingStopTime)
+                .map(chunk => chunk.data);
+            
+            console.log(`Found ${relevantChunks.length} chunks within recording window`);
+            
+            if (relevantChunks.length === 0) {
+                return null;
+            }
+            
+            // Create a blob from the relevant chunks
+            const audioType = relevantChunks[0].type || 'audio/webm';
+            const audioBlob = new Blob(relevantChunks, { type: audioType });
+            
+            if (audioBlob.size < 100) {
+                console.warn("Extracted continuous audio is too small");
+                return null;
+            }
+            
+            return this.createFinalResult(audioBlob, audioType);
+        } catch (e) {
+            console.error("Error extracting continuous audio:", e);
+            return null;
+        }
+    }
+    
+    stopMediaTracks() {
+        // Stop continuous recording
+        this.stopContinuousRecording();
+        
+        // Only stop media tracks if we're fully done with recording
+        if (this.stream && !this.isContinuousRecording) {
+            this.stream.getTracks().forEach(track => track.stop());
+            this.stream = null;
+        }
+    }
+    
+    // Stop all recordings and clean up resources
+    cleanup() {
+        this.stopContinuousRecording();
+        
+        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+            try {
+                this.mediaRecorder.stop();
+            } catch (e) {
+                console.error("Error stopping main recorder during cleanup:", e);
+            }
+        }
+        
+        if (this.stream) {
+            this.stream.getTracks().forEach(track => track.stop());
+            this.stream = null;
+        }
+        
+        this.isRecording = false;
+        this.isContinuousRecording = false;
+    }
+
     // New method to create a standardized result object
     createFinalResult(blob, type) {
         // Determine if this is likely a format that works well with Whisper API
@@ -335,13 +592,13 @@ class AudioRecorder {
     
     // New method to check if browser transcription should be preferred
     shouldPreferBrowserTranscription() {
-        // Only return true for iOS devices with the iOS speech service
-        return this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable;
+        // Only return true for iOS devices with iOS speech service available
+        return this.isIOS && this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable;
     }
     
     // New method to get the appropriate transcription service
     getTranscriptionService() {
-        if (this.useIOSSpeech) {
+        if (this.isIOS && this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable) {
             return window.iosSpeechService;
         }
         return window.transcriptionService;
@@ -350,7 +607,7 @@ class AudioRecorder {
     // New method to record audio with the appropriate transcription method
     async startRecordingWithTranscription(callbacks = {}) {
         // For iOS devices, use the iOS speech recognition service if available
-        if (this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable) {
+        if (this.isIOS && this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable) {
             const success = await this.startRecording();
             if (success) {
                 // Set up callbacks for iOS speech service
@@ -376,11 +633,11 @@ class AudioRecorder {
     }
 
     async stopRecordingWithTranscription() {
-        // For iOS devices, stop the iOS speech recognition service first if available
+        // For iOS devices, stop the iOS speech recognition service if available
         let iosTranscript = null;
         let useIOSSpeech = false;
         
-        if (this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable) {
+        if (this.isIOS && this.useIOSSpeech && window.iosSpeechService && window.iosSpeechService.isAvailable) {
             // Get transcript from iOS speech service
             iosTranscript = window.iosSpeechService.stopListening();
             useIOSSpeech = true;
@@ -408,3 +665,8 @@ class AudioRecorder {
 
 // Create a global instance of the audio recorder
 const audioRecorder = new AudioRecorder();
+
+// Add cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    audioRecorder.cleanup();
+});

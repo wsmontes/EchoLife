@@ -15,6 +15,14 @@ class IOSSpeechService {
         this.interimTranscript = '';
         this.iosVersion = this.getIOSVersion();
         
+        // Enhanced transcript collection
+        this.finalTranscript = '';
+        this.interimTranscript = '';
+        this.allResults = []; // Track all final results for complete transcript
+        this.transcriptBuffer = [];  // Buffer to store all recognized segments
+        this.recognitionInProgress = false;
+        this.lastProcessedIndex = 0;
+        
         // Event callbacks
         this.onTranscriptUpdate = null;
         this.onFinalTranscript = null;
@@ -47,6 +55,7 @@ class IOSSpeechService {
         this.recognition.continuous = true;
         this.recognition.interimResults = true;
         this.recognition.lang = 'en-US'; // Default to English
+        this.recognition.maxAlternatives = 1;
         
         // Set up event handlers
         this.recognition.onresult = this.handleResult.bind(this);
@@ -55,24 +64,49 @@ class IOSSpeechService {
     }
     
     handleResult(event) {
-        let interim = '';
-        let final = this.finalTranscript;
+        // Improved result handling to ensure complete transcript
+        const results = Array.from(event.results);
         
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-            const transcript = event.results[i][0].transcript;
-            if (event.results[i].isFinal) {
-                final += transcript + ' ';
+        // Process all results from the lastProcessedIndex
+        let interimText = '';
+        let hasNewFinal = false;
+        
+        // Debug info to track what's happening
+        console.log(`Processing results: ${this.lastProcessedIndex} to ${results.length-1}`);
+        
+        for (let i = this.lastProcessedIndex; i < results.length; i++) {
+            const result = results[i];
+            const transcript = result[0].transcript.trim();
+            
+            if (result.isFinal) {
+                // Store all final results in our buffer
+                this.transcriptBuffer.push(transcript);
+                this.allResults.push(transcript);
+                hasNewFinal = true;
+                console.log(`Final segment added: "${transcript}"`);
             } else {
-                interim += transcript;
+                interimText += transcript + ' ';
             }
         }
         
-        this.finalTranscript = final;
-        this.interimTranscript = interim;
+        // Update the last processed index to avoid reprocessing
+        this.lastProcessedIndex = results.length;
+        
+        // Reconstruct the final transcript from the buffer
+        this.finalTranscript = this.transcriptBuffer.join(' ');
+        this.interimTranscript = interimText;
+        
+        // Update the combined transcript for immediate access
+        const combinedTranscript = this.finalTranscript + ' ' + this.interimTranscript;
+        
+        // Debug
+        if (hasNewFinal) {
+            console.log(`Updated final transcript (${this.transcriptBuffer.length} segments)`, this.finalTranscript);
+        }
         
         // Call update callback with both transcripts
         if (this.onTranscriptUpdate) {
-            this.onTranscriptUpdate(final, interim);
+            this.onTranscriptUpdate(this.finalTranscript, this.interimTranscript);
         }
     }
     
@@ -93,6 +127,10 @@ class IOSSpeechService {
     
     handleEnd() {
         console.log('iOS Speech Recognition ended');
+        this.recognitionInProgress = false;
+        
+        // When recognition ends, make sure we've included all final segments
+        this.ensureCompleteTranscript();
         
         // Auto-restart if we're still supposed to be listening
         if (this.isListening) {
@@ -100,30 +138,45 @@ class IOSSpeechService {
             this.restartListening();
         } else if (this.onFinalTranscript) {
             // If we're done listening, provide the final transcript
+            console.log(`Providing final transcript (${this.transcriptBuffer.length} segments):`, this.finalTranscript);
             this.onFinalTranscript(this.finalTranscript);
         }
     }
     
+    ensureCompleteTranscript() {
+        // Make sure our final transcript includes everything
+        if (this.allResults.length > this.transcriptBuffer.length) {
+            console.log("Adding missed segments to final transcript");
+            this.transcriptBuffer = [...this.allResults];
+            this.finalTranscript = this.transcriptBuffer.join(' ');
+        }
+    }
+    
     restartListening() {
-        if (this.isListening) {
-            try {
-                this.recognition.start();
-                console.log('iOS Speech Recognition restarted');
-            } catch (e) {
-                console.error('Failed to restart iOS Speech Recognition:', e);
-                
-                // If already running error, try stopping first
-                if (e.name === 'InvalidStateError') {
-                    try {
-                        this.recognition.stop();
-                        setTimeout(() => {
-                            this.recognition.start();
-                        }, 500);
-                    } catch (stopError) {
-                        console.error('Error during restart sequence:', stopError);
+        if (this.isListening && !this.recognitionInProgress) {
+            // Small delay before restarting to prevent rapid start/stop cycles
+            setTimeout(() => {
+                try {
+                    this.recognition.start();
+                    this.recognitionInProgress = true;
+                    console.log('iOS Speech Recognition restarted');
+                } catch (e) {
+                    console.error('Failed to restart iOS Speech Recognition:', e);
+                    
+                    // If already running error, try stopping first
+                    if (e.name === 'InvalidStateError') {
+                        try {
+                            this.recognition.stop();
+                            setTimeout(() => {
+                                this.recognition.start();
+                                this.recognitionInProgress = true;
+                            }, 500);
+                        } catch (stopError) {
+                            console.error('Error during restart sequence:', stopError);
+                        }
                     }
                 }
-            }
+            }, 300);
         }
     }
     
@@ -133,13 +186,17 @@ class IOSSpeechService {
         }
         
         try {
-            // Reset transcript
+            // Reset transcript and related state
             this.finalTranscript = '';
             this.interimTranscript = '';
+            this.transcriptBuffer = [];
+            this.allResults = [];
+            this.lastProcessedIndex = 0;
             
             // Start recognition
             this.recognition.start();
             this.isListening = true;
+            this.recognitionInProgress = true;
             console.log('iOS Speech Recognition started');
             return true;
         } catch (e) {
@@ -152,6 +209,7 @@ class IOSSpeechService {
                     setTimeout(() => {
                         this.recognition.start();
                         this.isListening = true;
+                        this.recognitionInProgress = true;
                     }, 500);
                     return true;
                 } catch (stopError) {
@@ -165,13 +223,17 @@ class IOSSpeechService {
     
     stopListening() {
         if (!this.isAvailable || !this.recognition) {
-            return false;
+            return this.finalTranscript || '';
         }
         
         try {
             this.isListening = false;
+            
+            // Make sure to include all segments before stopping
+            this.ensureCompleteTranscript();
+            
+            console.log(`Stopping iOS Speech Recognition with transcript (${this.transcriptBuffer.length} segments):`, this.finalTranscript);
             this.recognition.stop();
-            console.log('iOS Speech Recognition stopped');
             
             return this.finalTranscript;
         } catch (e) {

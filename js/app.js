@@ -222,18 +222,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.lastSpeechRecognitionEvent = Date.now();
                 
                 let interimTranscript = '';
+                let newFinalTranscript = '';
                 
                 for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
                     if (event.results[i].isFinal) {
-                        partialTranscript += event.results[i][0].transcript + ' ';
+                        newFinalTranscript += transcript + ' ';
                         recognizedSpeech = true;
                     } else {
-                        interimTranscript += event.results[i][0].transcript;
+                        interimTranscript += transcript;
                     }
                 }
                 
-                // Use only the interim transcript for real-time tag extraction
-                handleRealtimeSpeech(interimTranscript);
+                // Add to partial transcript if we have final results
+                if (newFinalTranscript) {
+                    partialTranscript += newFinalTranscript;
+                    console.log("Added to partialTranscript:", newFinalTranscript);
+                    console.log("Current partialTranscript:", partialTranscript);
+                }
+                
+                // Use the combined transcript for real-time tag extraction
+                handleRealtimeSpeech(partialTranscript + ' ' + interimTranscript);
             };
             
             window.speechRecognition.onerror = (event) => {
@@ -424,7 +433,11 @@ document.addEventListener('DOMContentLoaded', () => {
             recordButton.classList.remove('recording');
             recordingIndicator.classList.add('hidden');
             
-            // Stop the speech recognition
+            // Save the current transcript state before stopping
+            const savedTranscript = partialTranscript;
+            console.log("Saved transcript before stopping recognition:", savedTranscript);
+            
+            // Stop the speech recognition if we're not using iOS speech
             if (!audioRecorder.useIOSSpeech && window.speechRecognition) {
                 try {
                     window.speechRecognition.stop();
@@ -448,6 +461,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await audioRecorder.stopRecordingWithTranscription();
             const audioResult = result.audio;
             
+            console.log("Audio recording stopped, result:", audioResult ? 
+              `blob: ${audioResult.blob.size} bytes, type: ${audioResult.type}` : "No audio result");
+            
             if (audioResult && audioResult.blob && audioResult.blob.size > 0) {
                 try {
                     console.log(`Processing audio recording: ${audioResult.blob.size} bytes, type: ${audioResult.blob.type}, chunks: ${audioResult.chunks || 1}`);
@@ -462,21 +478,24 @@ document.addEventListener('DOMContentLoaded', () => {
                         transcriptionSource = "ios";
                         console.log("Using iOS native speech recognition result:", currentTranscript);
                     } else {
-                        // Try Whisper API
+                        // For non-iOS devices, try Whisper API first but with better fallback to browser transcript
                         try {
+                            console.log("Attempting Whisper API transcription...");
                             currentTranscript = await transcriptionService.transcribeAudio(audioResult);
-                            console.log("Whisper transcription result:", currentTranscript);
+                            console.log("Whisper transcription succeeded:", currentTranscript);
                         } catch (whisperError) {
                             console.error('Whisper transcription failed:', whisperError);
                             
-                            // If we have browser transcription as fallback, use it
-                            if (partialTranscript && partialTranscript.length > 10) {
-                                console.log('Using browser SpeechRecognition as fallback');
-                                currentTranscript = partialTranscript;
+                            // Use saved browser transcription as fallback
+                            if (savedTranscript && savedTranscript.length > 5) {
+                                console.log('Using browser SpeechRecognition as fallback:', savedTranscript);
+                                currentTranscript = savedTranscript.trim();
                                 transcriptionSource = "browser";
                                 
-                                // Show a note that we're using the browser transcription
-                                alert("Using your device's built-in speech recognition as a fallback. This may be less accurate than our cloud service, but should work for simple recordings.");
+                                if (!audioRecorder.isIOS) {
+                                    // Only show this message for non-iOS devices since it's expected on iOS
+                                    console.log("Using browser speech recognition result as fallback");
+                                }
                             } else {
                                 // If no fallback is available, rethrow the error
                                 throw whisperError;
@@ -517,8 +536,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Store audio result for export
                     lastAudioResult = audioResult;
                     
-                    // Get subtitle data from the transcription service, which now uses Whisper's timestamps
-                    // Only available if we used Whisper API, otherwise generate timestamps
+                    // Get subtitle data from the transcription service - properly handle all sources
                     let whisperSubtitles = null;
                     if (transcriptionSource === "whisper") {
                         whisperSubtitles = transcriptionService.getSubtitleData();
@@ -529,9 +547,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         subtitlesData = whisperSubtitles;
                         console.log("Using Whisper's native timestamps for subtitles");
                     } else {
-                        // Fall back to our estimation method if needed
+                        // Fall back to our estimation method for other transcription sources
                         subtitlesData = generateSubtitleData(currentTranscript);
-                        console.log("Falling back to estimated timestamps for subtitles");
+                        console.log(`Falling back to estimated timestamps for subtitles (source: ${transcriptionSource})`);
                     }
                     
                     // Enable export buttons
@@ -586,11 +604,38 @@ document.addEventListener('DOMContentLoaded', () => {
                     isProcessingAudio = false;
                 }
             } else {
+                console.error("No valid audio data received after recording");
                 recordingStatus.textContent = 'No audio recorded. Try again.';
+                
+                // Still try to use the browser transcript if we have it
+                if (savedTranscript && savedTranscript.length > 10) {
+                    console.log("No audio but we have browser transcript, using it anyway");
+                    currentTranscript = savedTranscript;
+                    addMessageToChat('user', currentTranscript);
+                    
+                    // Extract tags from the transcript
+                    try {
+                        const tags = await tagExtractor.extractTags(currentTranscript, 8, true);
+                        
+                        // Update word cloud
+                        if (window.wordCloud) {
+                            window.wordCloud.updateWordCloud(tags);
+                        }
+                        
+                        feedbackButton.disabled = false;
+                    } catch (e) {
+                        console.error("Error extracting tags from browser transcript:", e);
+                    }
+                }
+                
                 recordButton.disabled = false;
                 recordButton.classList.remove('processing');
                 isProcessingAudio = false;
-                feedbackButton.disabled = true;
+                
+                // Don't disable the feedback button if we have transcript
+                if (!currentTranscript) {
+                    feedbackButton.disabled = true;
+                }
             }
         }
     }
@@ -941,47 +986,95 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error('Error stopping speech recognition on page unload:', e);
             }
         }
+        
+        // Make sure to clean up audio recorder resources
+        if (audioRecorder) {
+            audioRecorder.cleanup();
+        }
     });
     
     // Preview audio with subtitles
     function previewWithSubtitles() {
-        if (!lastAudioResult || !lastAudioResult.blob || subtitlesData.length === 0) return;
+        if (!lastAudioResult || !lastAudioResult.blob || subtitlesData.length === 0) {
+            console.error("Cannot preview: missing audio or subtitles");
+            return;
+        }
         
-        // Create object URL for the audio blob
-        const audioUrl = URL.createObjectURL(lastAudioResult.blob);
+        // Log audio details for debugging
+        console.log(`Previewing audio: type=${lastAudioResult.type}, size=${lastAudioResult.blob.size}, codec=${lastAudioResult.codecInfo || 'unknown'}`);
         
-        // Set the audio source
-        previewAudioPlayer.src = audioUrl;
-        
-        // Show the subtitle preview container
-        subtitlePreviewContainer.style.display = 'block';
-        
-        // Clear any previous event listeners
-        previewAudioPlayer.ontimeupdate = null;
-        
-        // Add timeupdate event listener to sync subtitles
-        previewAudioPlayer.ontimeupdate = function() {
-            const currentTime = previewAudioPlayer.currentTime;
+        try {
+            // Create a new blob with explicit type to ensure browser compatibility
+            let previewBlob = lastAudioResult.blob;
+            let previewType = lastAudioResult.type;
             
-            // Find the subtitle that should be displayed
-            const currentSubtitle = subtitlesData.find(sub => 
-                currentTime >= sub.startTime && currentTime <= sub.endTime
-            );
-            
-            // Update subtitle display
-            if (currentSubtitle) {
-                previewSubtitleDisplay.textContent = currentSubtitle.text;
-                previewSubtitleDisplay.style.display = 'flex';
-            } else {
-                previewSubtitleDisplay.style.display = 'none';
+            // If the audio type is empty or not set, try to use a browser-compatible type
+            if (!previewType || previewType === '') {
+                // Safari needs MP4, others work best with WebM
+                const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+                previewType = isSafari ? 'audio/mp4' : 'audio/webm';
+                console.log(`Using platform-specific audio type for preview: ${previewType}`);
+                previewBlob = new Blob([lastAudioResult.blob], { type: previewType });
             }
-        };
-        
-        // Start playing automatically
-        previewAudioPlayer.play().catch(e => {
-            console.error('Error auto-playing audio:', e);
-            // Auto-play might be blocked, user will need to press play manually
-        });
+            
+            // Create object URL for the audio blob
+            const audioUrl = URL.createObjectURL(previewBlob);
+            console.log(`Created URL for audio preview: ${audioUrl}`);
+            
+            // Set the audio source
+            previewAudioPlayer.src = audioUrl;
+            
+            // Clear any previous event listeners
+            previewAudioPlayer.oncanplaythrough = null;
+            previewAudioPlayer.onerror = null;
+            
+            // Listen for successful load
+            previewAudioPlayer.oncanplaythrough = function() {
+                console.log("Audio loaded successfully and can play through");
+            };
+            
+            // Handle audio loading errors
+            previewAudioPlayer.onerror = function(e) {
+                console.error("Error loading audio for preview:", previewAudioPlayer.error);
+                alert(`Error loading audio preview: ${previewAudioPlayer.error?.message || 'Unknown error'}`);
+            };
+            
+            // Show the subtitle preview container
+            subtitlePreviewContainer.style.display = 'block';
+            
+            // Clear any previous event listeners for timeupdate
+            previewAudioPlayer.ontimeupdate = null;
+            
+            // Add timeupdate event listener to sync subtitles
+            previewAudioPlayer.ontimeupdate = function() {
+                const currentTime = previewAudioPlayer.currentTime;
+                
+                // Find the subtitle that should be displayed
+                const currentSubtitle = subtitlesData.find(sub => 
+                    currentTime >= sub.startTime && currentTime <= sub.endTime
+                );
+                
+                // Update subtitle display
+                if (currentSubtitle) {
+                    previewSubtitleDisplay.textContent = currentSubtitle.text;
+                    previewSubtitleDisplay.style.display = 'flex';
+                } else {
+                    previewSubtitleDisplay.style.display = 'none';
+                }
+            };
+            
+            // Start playing automatically
+            previewAudioPlayer.play().catch(e => {
+                console.error('Error auto-playing audio:', e);
+                console.log('Auto-play was blocked. User will need to press play manually.');
+                // Indicate to the user they need to press play
+                previewSubtitleDisplay.textContent = 'Click play to start playback with subtitles';
+                previewSubtitleDisplay.style.display = 'flex';
+            });
+        } catch (error) {
+            console.error('Error setting up audio preview:', error);
+            alert('Could not preview audio: ' + error.message);
+        }
     }
     
     // Close subtitle preview
