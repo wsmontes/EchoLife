@@ -15,36 +15,37 @@
 <body>
     <div class="container">
         <header>
-            <!-- Header top with left and right sections -->
-            <div class="header-top" style="display: flex; justify-content: space-between; align-items: center;">
-                <!-- Left: language select and translation toggle -->
-                <div class="header-left" style="display: flex; align-items: center; gap: 10px;">
+            <h1>Echo Life</h1>
+            <p>Speak and connect with AI</p>
+            
+            <div class="top-controls-container">
+                <!-- Language controls container -->
+                <div class="language-controls">
+                    <!-- Language selector dropdown -->
                     <div class="language-selector-container">
                         <select id="languageSelector" class="language-selector">
-                            <option value="en-US">ENG</option>
-                            <option value="pt-BR">PT-BR</option>
+                            <option value="en-US">English</option>
+                            <option value="pt-BR">Português Brasileiro</option>
                         </select>
                     </div>
-                    <!-- Translation toggle without visible label, using tooltip via title attribute -->
+                    
+                    <!-- Translation toggle switch with tooltip - removed info icon -->
                     <div class="translation-toggle-container">
-                        <label class="toggle-switch" title="Toggle auto-translate">
+                        <label class="toggle-switch" title="Toggle between keeping the original language or translating between English and Portuguese">
                             <input type="checkbox" id="translationToggle">
                             <span class="slider round"></span>
                         </label>
+                        <span class="toggle-label" id="translationToggleLabel">Translate</span>
                     </div>
                 </div>
-                <!-- Right: small API key button -->
-                <div class="header-right">
-                    <button id="editApiKeyButton" style="padding:6px 12px; border:none; background: var(--accent-color); color: white; border-radius:4px; cursor:pointer;">
-                        Edit API Key
-                    </button>
-                </div>
+                
+                <!-- API Key editing button -->
+                <button id="editApiKeyButton">
+                    <i class="fas fa-key"></i> Edit API Key
+                </button>
             </div>
-            <h1>Echo Life</h1>
-            <!-- Changed subtitle to a clever one -->
-            <p>Let your voice spark tomorrow’s conversation</p>
         </header>
-        
+
         <main>
             <!-- Word Cloud visualization - without explicit title -->
             <section class="word-cloud-section">
@@ -71,12 +72,19 @@
             </section>
             
             <!-- Simplified Audio drop area section -->
-            <section class="audio-drop-section">
-                <h2>Upload Audio</h2>
-                <div id="audio-upload-placeholder"></div>
-                <div class="upload-formats-info">
-                    <p>Supported formats: MP3, WAV, M4A, AAC, OPUS, OGG</p>
-                    <p class="whatsapp-hint">WhatsApp voice messages are fully supported.</p>
+            <section class="audio-drop-section foldable-section collapsed">
+                <div class="section-header">
+                    <h2>Upload Audio</h2>
+                    <button class="toggle-button" aria-label="Toggle section">
+                        <i class="fas fa-chevron-down"></i>
+                    </button>
+                </div>
+                <div class="section-content">
+                    <div id="audio-upload-placeholder"></div>
+                    <div class="upload-formats-info">
+                        <p>Supported formats: MP3, WAV, M4A, AAC, OPUS, OGG</p>
+                        <p class="whatsapp-hint">WhatsApp voice messages are fully supported.</p>
+                    </div>
                 </div>
             </section>
             
@@ -170,5 +178,50 @@
     <script src="js/word-cloud.js"></script>
     <script src="js/app.js"></script>
     <script src="js/diagnostic-tools.js"></script> <!-- Add diagnostic tools at the end -->
+    <script>
+        // Initialize the word cloud when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            // Make sure WordCloud is initialized first
+            if (typeof WordCloud === 'undefined') {
+                console.error('WordCloud is not defined. Check if word-cloud.js is loaded properly.');
+            } else {
+                try {
+                    // Initialize the word cloud with the container ID
+                    window.wordCloud = new WordCloud('wordCloudContainer');
+                    console.log('Word cloud initialized');
+                } catch (error) {
+                    console.error('Error initializing WordCloud:', error);
+                }
+            }
+            
+            // Setup language selector change event
+            if (document.getElementById('languageSelector')) {
+                // Define updateToggleLabel function
+                function updateToggleLabel() {
+                    // Get the language from the selector
+                    const languageSelector = document.getElementById('languageSelector');
+                    const selectedLanguage = languageSelector ? languageSelector.value : 'en-US';
+                    
+                    // Get the toggle label element
+                    const toggleLabel = document.getElementById('translationToggleLabel');
+                    
+                    // Update the label text based on selected language
+                    if (toggleLabel) {
+                        toggleLabel.textContent = selectedLanguage === 'pt-BR' ? 'Tradução' : 'Translate';
+                    }
+                    
+                    console.log(`Toggle label updated for language: ${selectedLanguage}`);
+                }
+                
+                // Add event listener with the now defined function
+                document.getElementById('languageSelector').addEventListener('change', updateToggleLabel);
+                
+                // Also expose it globally in case it's needed elsewhere
+                window.updateToggleLabel = updateToggleLabel;
+            } else {
+                console.warn('Language selector not found');
+            }
+        });
+    </script>
 </body>
 </html>

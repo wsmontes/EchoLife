@@ -1,36 +1,35 @@
-/* Word Cloud Visualization */
+/* Word Cloud Container */
 .word-cloud-container {
     position: relative;
     width: 100%;
     height: 300px;
-    background: linear-gradient(to bottom right, #f8f9fa, #e9ecef);
-    border-radius: var(--border-radius);
+    background-color: #f8f9fa;
+    border-radius: 10px;
+    margin: 0;
     overflow: hidden;
-    margin: 20px 0;
-    box-shadow: inset 0 0 10px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
 }
 
 .fullscreen-toggle {
     position: absolute;
-    top: 10px;
+    bottom: 10px;
     right: 10px;
-    z-index: 10;
-    background: rgba(255,255,255,0.7);
+    background: rgba(0, 0, 0, 0.1);
     border: none;
     border-radius: 50%;
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.2s ease;
-    color: var(--text-color);
+    z-index: 2;
 }
 
 .fullscreen-toggle:hover {
-    background: rgba(255,255,255,0.9);
-    transform: scale(1.1);
+    background: rgba(0, 0, 0, 0.2);
 }
 
 .word-cloud-container.fullscreen {
@@ -40,27 +39,33 @@
     width: 100vw;
     height: 100vh;
     z-index: 1000;
+    margin: 0;
     border-radius: 0;
+    background-color: rgba(255, 255, 255, 0.95);
 }
 
 .word {
     position: absolute;
-    display: inline-block;
-    padding: 4px 8px;
-    border-radius: 12px;
-    color: white;
-    font-weight: 500;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    padding: 3px 8px;
+    border-radius: 15px;
+    background-color: rgba(255, 255, 255, 0.8);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     user-select: none;
-    cursor: pointer;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    opacity: 0;
-    transform: scale(0);
-    transition: 
-        transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275), 
-        opacity 0.5s ease,
-        background-color 0.3s ease;
-    will-change: transform, opacity, left, top;
+    cursor: default;
+    transition: transform 0.3s ease, opacity 0.5s ease, color 0.5s ease, background-color 0.5s ease;
+    opacity: 0.9;
+    animation: fadeIn 0.5s ease-out forwards;
+}
+
+.word.new-entry {
+    animation: fadeInScale 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+.word:hover {
+    transform: scale(1.1);
+    opacity: 1;
+    z-index: 5;
+    box-shadow: 0 6px 12px rgba(0,0,0,0.2);
 }
 
 .word.visible {
@@ -107,10 +112,31 @@
 }
 
 .word.uncertain {
-    border: 2px dashed rgba(255, 255, 255, 0.5);
+    border: 1px dashed white;
     font-style: italic;
-    opacity: 0.85;
+    opacity: 0.8;
     animation: pulse-uncertain 3s infinite;
+}
+
+.word.translated::after {
+    content: "↔";
+    position: absolute;
+    top: -5px;
+    right: -8px;
+    background-color: rgba(255, 255, 255, 0.7);
+    color: #333;
+    font-size: 10px;
+    padding: 1px 3px;
+    border-radius: 50%;
+    border: 1px solid currentColor;
+}
+
+.word.translated-to-en::after {
+    content: "→EN";
+}
+
+.word.translated-to-pt::after {
+    content: "→PT";
 }
 
 .word-cloud-placeholder {
@@ -120,6 +146,31 @@
     transform: translate(-50%, -50%);
     color: #aaa;
     font-style: italic;
+    text-align: center;
+    pointer-events: none;
+}
+
+.word-cloud-health-indicator {
+    position: absolute;
+    bottom: 5px;
+    right: 5px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: gray;
+    transition: background-color 0.5s;
+    opacity: 0.5;
+}
+
+.word-cloud-language-indicator {
+    position: absolute;
+    bottom: 5px;
+    left: 5px;
+    font-size: 10px;
+    color: #777;
+    padding: 2px 5px;
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 3px;
 }
 
 @keyframes float {
@@ -171,12 +222,157 @@
     margin-right: 5px;
 }
 
-@media (max-width: 576px) {
-    .word-cloud-container {
-        height: 200px;
-        margin: 10px 0;
-    }
+/* Word sizes */
+.word.small {
+    font-size: 12px;
+}
+
+.word.medium {
+    font-size: 16px;
+}
+
+.word.large {
+    font-size: 22px;
+    font-weight: 500;
+}
+
+.word.x-large {
+    font-size: 28px;
+    font-weight: 600;
+}
+
+/* Confidence levels */
+.word.high-confidence {
+    font-weight: bold;
+}
+
+.word.low-confidence {
+    font-style: italic;
+    opacity: 0.7;
+}
+
+/* Special states */
+.word.uncertain {
+    font-style: italic;
+    border: 1px dashed rgba(0, 0, 0, 0.2);
+}
+
+.word.new {
+    animation: fadeInPulse 0.8s ease-out forwards;
+}
+
+.word.fade-out {
+    opacity: 0;
+    transform: scale(0.8);
+}
+
+.word.update-pulse {
+    animation: pulse 0.8s ease-out;
+}
+
+/* Word Cloud health indicator */
+.health-indicator {
+    position: absolute;
+    bottom: 5px;
+    right: 5px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: gray;
+    transition: background-color 0.5s;
+    opacity: 0.5;
+}
+
+/* Language indicator */
+.language-indicator {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    font-size: 12px;
+    color: #888;
+    background-color: rgba(255, 255, 255, 0.7);
+    padding: 3px 8px;
+    border-radius: 10px;
+    z-index: 2;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.8); }
+    to { opacity: 0.9; transform: scale(1); }
+}
+
+@keyframes fadeInPulse {
+    0% { opacity: 0; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.1); }
+    100% { opacity: 0.9; transform: scale(1); }
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+@keyframes fadeInScale {
+    0% { opacity: 0; transform: scale(0.8); }
+    70% { opacity: 1; transform: scale(1.1); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulseChangeConfidence {
+    0% { background-color: rgba(255, 193, 7, 0.1); }
+    50% { background-color: rgba(255, 193, 7, 0.3); }
+    100% { background-color: rgba(255, 193, 7, 0); }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
     .word {
-        font-size: 1rem; /* reduce base font size */
+        font-size: 90%;  /* Slightly reduce all font sizes */
+    }
+    
+    .word.small {
+        font-size: 11px;
+    }
+
+    .word.medium {
+        font-size: 14px;
+    }
+
+    .word.large {
+        font-size: 18px;
+    }
+
+    .word.x-large {
+        font-size: 22px;
+    }
+}
+
+@media (max-width: 480px) {
+    .word {
+        font-size: 85%;  /* Further reduce font sizes */
+        padding: 2px 6px;
+    }
+    
+    .word.small {
+        font-size: 10px;
+    }
+
+    .word.medium {
+        font-size: 12px;
+    }
+
+    .word.large {
+        font-size: 16px;
+    }
+
+    .word.x-large {
+        font-size: 20px;
+    }
+    
+    .fullscreen-toggle {
+        width: 25px;
+        height: 25px;
     }
 }
