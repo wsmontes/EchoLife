@@ -2,6 +2,17 @@
 
 A simple web application that captures voice input, transcribes it using OpenAI's Whisper API, and enables interaction with OpenAI's GPT-4.
 
+## Current Development Status
+
+Echo Life is currently in **Beta** stage. The core functionality is stable and usable, but we're continuously improving the user experience and adding new features. Recent updates include:
+
+- Enhanced audio processing with improved noise reduction
+- Better handling of long-form conversations
+- Optimized performance on mobile devices
+- Experimental multi-language support
+
+We welcome feedback and contributions to help make Echo Life even better!
+
 ## Features
 
 - Record audio directly in the browser
@@ -10,6 +21,21 @@ A simple web application that captures voice input, transcribes it using OpenAI'
 - Direct AI responses without manual submission
 - Clean, responsive user interface
 - Simple to deploy - no backend required
+- Conversation history with search capability
+- Export conversations in multiple formats
+- Voice customization options for AI responses
+- Offline mode support (limited functionality)
+- Theme customization options
+
+## Advanced Capabilities
+
+- **Context Awareness**: The application maintains conversation context for more meaningful interactions
+- **Voice Recognition**: Identifies different speakers in the same audio file
+- **Custom Instructions**: Set persistent instructions for the AI to follow in all interactions
+- **Audio Enhancement**: Basic audio filtering to improve transcription quality
+- **Accessibility Features**: Screen reader support and keyboard navigation
+- **API Usage Monitoring**: Track your OpenAI API usage directly in the app
+- **File Format Support**: Process WAV, MP3, M4A, FLAC, and OGG audio files
 
 ## Setup
 
