@@ -946,3 +946,187 @@ input:checked + .slider:before {
 .audio-drop-section .section-content {
     padding-top: 1rem;
 }
+
+/* Add styles for auto gain control */
+.auto-gain-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 10px;
+    font-size: 0.85rem;
+}
+
+.auto-gain-container .toggle-label {
+    margin-left: 8px;
+    color: #666;
+}
+
+/* Reuse existing toggle switch styles - make sure they're in your CSS */
+.auto-gain-container .toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 20px;
+}
+
+.auto-gain-container .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.auto-gain-container .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+}
+
+.auto-gain-container .slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    transition: .4s;
+}
+
+.auto-gain-container input:checked + .slider {
+    background-color: #4CAF50;
+}
+
+.auto-gain-container input:focus + .slider {
+    box-shadow: 0 0 1px #4CAF50;
+}
+
+.auto-gain-container input:checked + .slider:before {
+    transform: translateX(20px);
+}
+
+.auto-gain-container .slider.round {
+    border-radius: 34px;
+}
+
+.auto-gain-container .slider.round:before {
+    border-radius: 50%;
+}
+
+/* Enhanced styles for auto gain control with sensitivity options */
+.sensitivity-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.sensitivity-mode-selector {
+    margin-left: 5px;
+}
+
+.sensitivity-mode-selector select {
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    background-color: #f8f9fa;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.sensitivity-mode-selector select:hover:not(:disabled) {
+    border-color: #4CAF50;
+}
+
+.sensitivity-mode-selector select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: #f1f1f1;
+}
+
+/* Add highlight for maximum sensitivity mode */
+.sensitivity-mode-selector select option[value="maximum"] {
+    font-weight: bold;
+    color: #d35400;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+    .sensitivity-controls {
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .sensitivity-mode-selector {
+        margin-left: 0;
+        margin-top: 5px;
+    }
+}
+
+/* Add volume meter styling */
+.volume-display {
+    margin-top: 10px;
+    width: 100%;
+    max-width: 300px;
+    display: none;
+}
+
+.volume-meter-container {
+    width: 100%;
+}
+
+.volume-meter {
+    height: 8px;
+    background-color: #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
+}
+
+.volume-meter-level {
+    height: 100%;
+    width: 0%;
+    background-color: #4a90e2;
+    transition: width 0.1s, background-color 0.2s;
+}
+
+.volume-status {
+    font-size: 12px;
+    text-align: center;
+    margin-top: 4px;
+    color: #666;
+    transition: color 0.2s;
+}
+
+.volume-level-low .volume-meter-level {
+    background-color: #e74c3c;
+}
+
+.volume-level-good .volume-meter-level {
+    background-color: #2ecc71;
+}
+
+.volume-level-high .volume-meter-level {
+    background-color: #f39c12;
+}
+
+.volume-status.status-low {
+    color: #e74c3c;
+    font-weight: bold;
+}
+
+.volume-status.status-normal {
+    color: #2ecc71;
+}
+
+.volume-status.status-high {
+    color: #f39c12;
+    font-weight: bold;
+}

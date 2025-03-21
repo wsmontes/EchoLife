@@ -54,6 +54,38 @@ const translations = {
         'pt-BR': 'Usuários iOS: opção de upload recomendada'
     },
     
+    // New translation keys for audio conversion errors
+    'audio_conversion_failed': {
+        'en-US': 'Audio conversion failed. Try uploading a MP3/WAV file instead.',
+        'pt-BR': 'Conversão de áudio falhou. Tente fazer upload de um arquivo MP3/WAV.'
+    },
+    'audio_format_unsupported': {
+        'en-US': 'Audio format not supported. Try a different browser or upload a MP3/WAV file.',
+        'pt-BR': 'Formato de áudio não suportado. Tente um navegador diferente ou faça upload de um arquivo MP3/WAV.'
+    },
+    'audio_too_short': {
+        'en-US': 'Audio is too short. Please record at least 0.5 seconds.',
+        'pt-BR': 'Áudio muito curto. Por favor, grave pelo menos 0,5 segundos.'
+    },
+    'audio_too_large': {
+        'en-US': 'Audio is too large (max 25MB). Record a shorter clip or use lower quality.',
+        'pt-BR': 'Áudio muito grande (máx. 25MB). Grave um clipe mais curto ou use qualidade inferior.'
+    },
+    
+    // Microphone sensitivity translations
+    'mic_sensitivity': {
+        'en-US': 'Mic Sensitivity',
+        'pt-BR': 'Sensibilidade do Mic'
+    },
+    'auto_sensitivity': {
+        'en-US': 'Auto',
+        'pt-BR': 'Auto'
+    },
+    'maximum_sensitivity': {
+        'en-US': 'Maximum',
+        'pt-BR': 'Máximo'
+    },
+    
     // Upload section
     'upload_audio': {
         'en-US': 'Upload Audio',

@@ -67,6 +67,58 @@ class AudioRecorder {
         this.continuousStream = null;
         this.recordingStartTime = null;
         this.recordingStopTime = null;
+
+        // Add properties for automatic gain control
+        this.audioContext = null;
+        this.analyserNode = null;
+        this.gainNode = null;
+        this.mediaStreamSource = null;
+        this.autoGainEnabled = true; // Enable by default
+        this.minGain = 0.5;         // Minimum gain level
+        this.maxGain = 5.0;         // Maximum gain level
+        this.targetLevel = 0.75;    // Target level (0-1)
+        this.gainUpdateInterval = null;
+        this.lastGainAdjustment = 0;
+        this.audioLevels = [];      // Store recent audio levels
+        this.levelHistory = 10;     // Number of samples to keep
+        
+        // New properties for sensitivity modes
+        this.sensitivityMode = 'auto'; // Options: 'auto', 'maximum'
+        this.compressorNode = null;
+        this.maxGainValue = 10.0;   // Higher maximum for maximum sensitivity mode
+        this.noiseGateNode = null;
+        
+        // Make auto gain configurable through localStorage
+        const savedAutoGain = localStorage.getItem('echolife_auto_gain');
+        if (savedAutoGain !== null) {
+            this.autoGainEnabled = savedAutoGain === 'true';
+        }
+        
+        // Load sensitivity mode from localStorage
+        const savedSensitivityMode = localStorage.getItem('echolife_sensitivity_mode');
+        if (savedSensitivityMode === 'maximum' || savedSensitivityMode === 'auto') {
+            this.sensitivityMode = savedSensitivityMode;
+        }
+        
+        console.log(`Audio settings: auto gain=${this.autoGainEnabled}, sensitivity mode=${this.sensitivityMode}`);
+        
+        // Add audio level detection properties - simplified to use audioProcessor
+        this.audioLevelDetected = null; // Will be set to true/false based on detected audio
+        this.enableAudioLevelDetection = true; // Can be disabled if needed
+        this.audioLevelThreshold = 0.01; // Minimum RMS level to consider as valid audio
+        this.audioSampleBuffer = []; // Buffer to store audio levels for analysis
+
+        // Add better volume monitoring
+        this.analyserBuffer = new Uint8Array(1024);
+        this.volumeCallback = null; // Callback for volume updates
+        this.volumeUpdateInterval = null;
+        this.volumeUpdateFrequency = 200; // ms between updates
+        
+        // Add low volume detection to provide feedback to users
+        this.lowVolumeWarningThreshold = 0.05; // Level below which to warn user
+        this.hasDetectedLowVolume = false;
+        this.lowVolumeStartTime = null;
+        this.lowVolumeNotified = false;
     }
 
     // Get iOS version number if available; fallback to 0 to avoid null issues.
@@ -90,9 +142,20 @@ class AudioRecorder {
                         echoCancellation: true,
                         noiseSuppression: true,
                         // Use appropriate sample rate based on device
-                        sampleRate: this.isIOS ? 44100 : 48000
+                        sampleRate: this.isIOS ? 44100 : 48000,
+                        // Don't set autoGainControl here as we'll implement our own
+                        autoGainControl: false
                     }
                 });
+            }
+            
+            // Initialize audio context and gain control if enabled
+            if (this.autoGainEnabled && !this.isIOS) {
+                if (this.sensitivityMode === 'maximum') {
+                    this.setupMaximumSensitivity();
+                } else {
+                    this.setupAutoGainControl();
+                }
             }
             
             // Start continuous recording if not already running
@@ -183,6 +246,19 @@ class AudioRecorder {
             this.mediaRecorder.start(timeslice);
             
             this.isRecording = true;
+            
+            // Reset audio level detection
+            this.audioLevelDetected = null;
+            this.audioSampleBuffer = [];
+            
+            // Add volume monitoring
+            this.setupVolumeMonitoring();
+            
+            // Reset volume detection
+            this.hasDetectedLowVolume = false;
+            this.lowVolumeStartTime = null;
+            this.lowVolumeNotified = false;
+            
             return true;
         } catch (error) {
             console.error('Error starting recording:', error);
@@ -262,6 +338,29 @@ class AudioRecorder {
     }
 
     stopRecording() {
+        // Stop auto gain adjustment if it's running
+        this.stopGainAdjustment();
+        
+        // Clean up audio context resources
+        if (this.mediaStreamSource) {
+            try {
+                this.mediaStreamSource.disconnect();
+            } catch (e) {
+                console.error("Error disconnecting media stream source:", e);
+            }
+        }
+        
+        if (this.gainNode) {
+            try {
+                this.gainNode.disconnect();
+            } catch (e) {
+                console.error("Error disconnecting gain node:", e);
+            }
+        }
+
+        // Stop volume monitoring
+        clearInterval(this.volumeUpdateInterval);
+
         return new Promise((resolve) => {
             if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
                 resolve(null);
@@ -299,7 +398,7 @@ class AudioRecorder {
                 }
             }, 5000);
             
-            this.mediaRecorder.addEventListener('stop', () => {
+            this.mediaRecorder.addEventListener('stop', async () => {
                 clearTimeout(timeout);
                 
                 // Log the chunks we've collected
@@ -459,6 +558,28 @@ class AudioRecorder {
                 console.log(`Final audio: type=${audioType}, size=${audioBlob.size} bytes`);
                 const result = this.createFinalResult(audioBlob, audioType);
                 
+                // If we didn't detect audio during recording, perform final analysis
+                if (this.audioLevelDetected === null && window.audioProcessor) {
+                    try {
+                        const analysis = await window.audioProcessor.analyzeAudio(audioBlob);
+                        result.audioLevelDetected = analysis.hasSpeech;
+                        result.audioAnalysis = analysis;
+                    } catch (e) {
+                        console.error("Error analyzing audio:", e);
+                        result.audioLevelDetected = true; // Default to true on error
+                    }
+                } else {
+                    // Use any detection we already made during recording
+                    result.audioLevelDetected = this.audioLevelDetected !== false;
+                }
+
+                // Add volume data to result
+                if (window.audioProcessor) {
+                    const volumeFeedback = window.audioProcessor.getVolumeFeedback();
+                    result.volumeData = volumeFeedback;
+                    result.hasLowVolume = this.hasDetectedLowVolume;
+                }
+                
                 resolve(result);
             });
             
@@ -532,6 +653,27 @@ class AudioRecorder {
     
     // Stop all recordings and clean up resources
     cleanup() {
+        // Stop gain adjustment
+        this.stopGainAdjustment();
+        
+        // Clean up additional audio nodes
+        if (this.compressorNode) {
+            try {
+                this.compressorNode.disconnect();
+            } catch (e) {
+                console.error("Error disconnecting compressor:", e);
+            }
+        }
+        
+        // Close audio context
+        if (this.audioContext) {
+            try {
+                this.audioContext.close();
+            } catch (e) {
+                console.error("Error closing audio context:", e);
+            }
+        }
+
         this.stopContinuousRecording();
         
         if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
@@ -661,6 +803,342 @@ class AudioRecorder {
             iosTranscript: iosTranscript,
             useIOSSpeech: useIOSSpeech
         };
+    }
+
+    // Add method to set up automatic gain control
+    setupAutoGainControl() {
+        try {
+            // Create audio context if not already created
+            if (!this.audioContext) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                this.audioContext = new AudioContext();
+            }
+            
+            // Create nodes for analysis and gain control
+            this.analyserNode = this.audioContext.createAnalyser();
+            this.analyserNode.fftSize = 256;
+            this.gainNode = this.audioContext.createGain();
+            
+            // Set initial gain to 1 (neutral)
+            this.gainNode.gain.value = 1.0;
+            
+            // Connect the stream to the audio nodes
+            this.mediaStreamSource = this.audioContext.createMediaStreamSource(this.stream);
+            this.mediaStreamSource.connect(this.gainNode);
+            this.gainNode.connect(this.analyserNode);
+            
+            // Note: We don't connect to audioContext.destination as that would create feedback
+            // Instead, the MediaRecorder will use the original stream
+            
+            // Create a buffer for the analysis
+            this.analyserBuffer = new Uint8Array(this.analyserNode.frequencyBinCount);
+            
+            // Start the gain adjustment loop
+            this.startGainAdjustment();
+            
+            console.log("Auto gain control initialized");
+        } catch (e) {
+            console.error("Error setting up auto gain control:", e);
+            // Continue without auto gain if it fails
+            this.autoGainEnabled = false;
+        }
+    }
+    
+    // Add method to set up maximum sensitivity
+    setupMaximumSensitivity() {
+        try {
+            // Create audio context if not already created
+            if (!this.audioContext) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                this.audioContext = new AudioContext();
+            }
+            
+            // Create a more sophisticated audio processing chain
+            this.analyserNode = this.audioContext.createAnalyser();
+            this.analyserNode.fftSize = 512; // Larger FFT for better frequency analysis
+            
+            // Create high-gain amplifier
+            this.gainNode = this.audioContext.createGain();
+            this.gainNode.gain.value = 5.0; // Start with a very high gain
+            
+            // Add a compressor to prevent clipping
+            this.compressorNode = this.audioContext.createDynamicsCompressor();
+            this.compressorNode.threshold.value = -24; // Lower threshold to compress earlier
+            this.compressorNode.knee.value = 30;      // Softer knee for more natural sound
+            this.compressorNode.ratio.value = 12;     // Higher ratio for stronger compression
+            this.compressorNode.attack.value = 0.003; // Fast attack
+            this.compressorNode.release.value = 0.25; // Moderate release
+            
+            // Connect the audio processing chain:
+            // source -> gain -> compressor -> analyser
+            this.mediaStreamSource = this.audioContext.createMediaStreamSource(this.stream);
+            this.mediaStreamSource.connect(this.gainNode);
+            this.gainNode.connect(this.compressorNode);
+            this.compressorNode.connect(this.analyserNode);
+            
+            // Create a buffer for the analysis
+            this.analyserBuffer = new Uint8Array(this.analyserNode.frequencyBinCount);
+            
+            // Start the gain adjustment loop
+            this.startGainAdjustment();
+            
+            console.log("Maximum sensitivity mode initialized with gain:", this.gainNode.gain.value);
+        } catch (e) {
+            console.error("Error setting up maximum sensitivity:", e);
+            // Fall back to auto gain if maximum fails
+            this.sensitivityMode = 'auto';
+            this.setupAutoGainControl();
+        }
+    }
+    
+    // Start periodic gain adjustment
+    startGainAdjustment() {
+        // Clear any existing interval
+        if (this.gainUpdateInterval) {
+            clearInterval(this.gainUpdateInterval);
+        }
+        
+        // Update gain every 500ms
+        this.gainUpdateInterval = setInterval(() => {
+            this.adjustGain();
+        }, 500);
+    }
+    
+    // Stop gain adjustment
+    stopGainAdjustment() {
+        if (this.gainUpdateInterval) {
+            clearInterval(this.gainUpdateInterval);
+            this.gainUpdateInterval = null;
+        }
+    }
+    
+    // Modified adjustGain method to handle different sensitivity modes
+    adjustGain() {
+        if (!this.analyserNode || !this.gainNode) return;
+        
+        try {
+            // Get current audio level
+            this.analyserNode.getByteTimeDomainData(this.analyserBuffer);
+            
+            // Calculate RMS audio level
+            let sum = 0;
+            for (let i = 0; i < this.analyserBuffer.length; i++) {
+                const amplitude = (this.analyserBuffer[i] - 128) / 128;
+                sum += amplitude * amplitude;
+            }
+            const rms = Math.sqrt(sum / this.analyserBuffer.length);
+            
+            // Add to level history
+            this.audioLevels.push(rms);
+            
+            if (this.audioLevels.length > this.levelHistory) {
+                this.audioLevels.shift();
+            }
+            
+            // Get average level
+            const avgLevel = this.audioLevels.reduce((a, b) => a + b, 0) / this.audioLevels.length;
+            
+            // Only adjust if we have enough samples and not too frequently
+            const now = Date.now();
+            if (this.audioLevels.length >= 3 && now - this.lastGainAdjustment > 300) {
+                // Calculate gain adjustment based on sensitivity mode
+                let newGain = this.gainNode.gain.value;
+                
+                if (this.sensitivityMode === 'maximum') {
+                    // Maximum sensitivity mode: aggressive adjustment
+                    if (avgLevel < 0.01) {
+                        // Very low level, boost gain significantly
+                        newGain = Math.min(newGain * 1.5, this.maxGainValue);
+                    } else if (avgLevel < this.targetLevel * 0.7) {
+                        // Low level, boost gain aggressively
+                        newGain = Math.min(newGain * 1.2, this.maxGainValue);
+                    } else if (avgLevel > this.targetLevel * 1.1) {
+                        // Only reduce if it's significantly above target
+                        newGain = Math.max(newGain * 0.95, this.minGain);
+                    }
+                } else {
+                    // Normal auto mode: original algorithm
+                    if (avgLevel > 0.01) {  // Ignore very low levels (silence)
+                        if (avgLevel < this.targetLevel * 0.8) {
+                            // Increase gain if too quiet (but gradually)
+                            newGain = Math.min(newGain * 1.1, this.maxGain);
+                        } else if (avgLevel > this.targetLevel * 1.2) {
+                            // Decrease gain if too loud (more quickly to prevent clipping)
+                            newGain = Math.max(newGain * 0.9, this.minGain);
+                        }
+                    }
+                }
+                
+                // Apply the new gain value (with smoother ramp for maximum mode)
+                const smoothingTime = this.sensitivityMode === 'maximum' ? 0.2 : 0.3;
+                this.gainNode.gain.setTargetAtTime(newGain, this.audioContext.currentTime, smoothingTime);
+                this.lastGainAdjustment = now;
+                
+                console.log(`Audio level: ${avgLevel.toFixed(3)}, Adjusted gain: ${newGain.toFixed(2)}, Mode: ${this.sensitivityMode}`);
+            }
+            
+            // Track audio levels for detection if enabled
+            if (this.enableAudioLevelDetection) {
+                // Get current level from analyser
+                this.analyserNode.getByteFrequencyData(this.analyserBuffer);
+                
+                // Calculate average level
+                let sum = 0;
+                for (let i = 0; i < this.analyserBuffer.length; i++) {
+                    sum += this.analyserBuffer[i];
+                }
+                const currentLevel = sum / (this.analyserBuffer.length * 255); // Normalize to 0-1
+                
+                // Set detection flag if level exceeds threshold
+                if (currentLevel > 0.01) { // Low threshold to detect any sound
+                    this.audioLevelDetected = true;
+                }
+            }
+        } catch (e) {
+            console.error("Error in gain adjustment:", e);
+            this.stopGainAdjustment();
+        }
+    }
+    
+    // Add method to switch sensitivity modes
+    setSensitivityMode(mode) {
+        if (mode !== 'auto' && mode !== 'maximum') {
+            console.error(`Invalid sensitivity mode: ${mode}`);
+            return false;
+        }
+        
+        this.sensitivityMode = mode;
+        localStorage.setItem('echolife_sensitivity_mode', mode);
+        
+        // If recording, update the audio processing chain
+        if (this.isRecording && this.autoGainEnabled) {
+            // Clean up existing nodes
+            this.stopGainAdjustment();
+            
+            // Disconnect existing audio nodes
+            if (this.mediaStreamSource) {
+                try {
+                    this.mediaStreamSource.disconnect();
+                } catch (e) {
+                    console.error("Error disconnecting media stream source:", e);
+                }
+            }
+            
+            if (this.gainNode) {
+                try {
+                    this.gainNode.disconnect();
+                } catch (e) {
+                    console.error("Error disconnecting gain node:", e);
+                }
+            }
+            
+            if (this.compressorNode) {
+                try {
+                    this.compressorNode.disconnect();
+                } catch (e) {
+                    console.error("Error disconnecting compressor node:", e);
+                }
+            }
+            
+            // Set up the appropriate mode
+            if (mode === 'maximum') {
+                this.setupMaximumSensitivity();
+            } else {
+                this.setupAutoGainControl();
+            }
+        }
+        
+        console.log(`Microphone sensitivity mode set to: ${mode}`);
+        return true;
+    }
+    
+    // Modified toggleAutoGain to work with sensitivity modes
+    toggleAutoGain(enabled) {
+        this.autoGainEnabled = enabled;
+        localStorage.setItem('echolife_auto_gain', enabled);
+        
+        if (enabled && this.isRecording && !this.isIOS) {
+            // Set up and start with appropriate sensitivity mode
+            if (this.sensitivityMode === 'maximum') {
+                this.setupMaximumSensitivity();
+            } else {
+                this.setupAutoGainControl();
+            }
+        } else if (!enabled) {
+            // Stop adjustment and reset gain to normal
+            this.stopGainAdjustment();
+            if (this.gainNode) {
+                this.gainNode.gain.value = 1.0;
+            }
+        }
+        
+        return this.autoGainEnabled;
+    }
+
+    // Setup volume monitoring
+    setupVolumeMonitoring() {
+        if (!this.analyserNode) return;
+        
+        clearInterval(this.volumeUpdateInterval);
+        
+        // Start regular volume updates
+        this.volumeUpdateInterval = setInterval(() => {
+            this.checkVolumeLevel();
+        }, this.volumeUpdateFrequency);
+    }
+    
+    // Check and report volume level
+    checkVolumeLevel() {
+        if (!this.analyserNode || !this.isRecording) return;
+        
+        try {
+            // Get current level from analyser
+            this.analyserNode.getByteFrequencyData(this.analyserBuffer);
+            
+            // Calculate average level
+            let sum = 0;
+            for (let i = 0; i < this.analyserBuffer.length; i++) {
+                sum += this.analyserBuffer[i];
+            }
+            const currentLevel = sum / (this.analyserBuffer.length * 255); // Normalize to 0-1
+            
+            // Add to audio processor's history for later use in transcription
+            if (window.audioProcessor) {
+                window.audioProcessor.addVolumeReading(currentLevel);
+            }
+            
+            // Call volume callback if set
+            if (this.volumeCallback && typeof this.volumeCallback === 'function') {
+                this.volumeCallback(currentLevel);
+            }
+            
+            // Check for consistently low volume 
+            if (currentLevel < this.lowVolumeWarningThreshold) {
+                if (!this.lowVolumeStartTime) {
+                    this.lowVolumeStartTime = Date.now();
+                } else if (!this.lowVolumeNotified && Date.now() - this.lowVolumeStartTime > 2000) {
+                    // If we've had low volume for 2+ seconds, notify
+                    this.hasDetectedLowVolume = true;
+                    this.lowVolumeNotified = true;
+                    
+                    // Dispatch an event so UI can show a warning
+                    const event = new CustomEvent('lowVolumeDetected', {
+                        detail: { level: currentLevel }
+                    });
+                    window.dispatchEvent(event);
+                }
+            } else {
+                // Reset low volume tracking
+                this.lowVolumeStartTime = null;
+            }
+        } catch (e) {
+            console.error('Error monitoring volume:', e);
+        }
+    }
+
+    // New method to register a volume level callback
+    onVolumeUpdate(callback) {
+        this.volumeCallback = callback;
     }
 }
 

@@ -289,22 +289,46 @@ document.addEventListener('DOMContentLoaded', () => {
                         console.log('Speech recognition appears to be stalled, restarting...');
                         try {
                             // Check if already running before trying to stop
-                            if (window.speechRecognition && window.speechRecognitionActive) {
-                                window.speechRecognition.stop();
-                                window.speechRecognitionActive = false;
-                                console.log('Stopped stalled speech recognition');
+                            if (window.speechRecognition) {
+                                // Store the current state
+                                const wasActive = window.speechRecognitionActive;
                                 
-                                // Use setTimeout to ensure complete stop before restarting
-                                setTimeout(() => {
+                                // Only try to stop if it's active
+                                if (wasActive) {
+                                    try {
+                                        window.speechRecognition.stop();
+                                        window.speechRecognitionActive = false;
+                                        console.log('Stopped stalled speech recognition');
+                                    } catch (stopError) {
+                                        console.error('Error stopping speech recognition:', stopError);
+                                    }
+                                    
+                                    // Use setTimeout to ensure complete stop before restarting
+                                    setTimeout(() => {
+                                        try {
+                                            // Double-check it's not already running again
+                                            if (!window.speechRecognitionActive) {
+                                                window.speechRecognition.start();
+                                                window.speechRecognitionActive = true;
+                                                console.log('Successfully restarted speech recognition');
+                                                window.lastSpeechRecognitionEvent = Date.now();
+                                            } else {
+                                                console.log('Speech recognition already running, skipping restart');
+                                            }
+                                        } catch (startError) {
+                                            console.error('Failed to restart speech recognition:', startError);
+                                        }
+                                    }, 500); // Increased timeout to ensure stop completes
+                                } else {
+                                    console.log('Speech recognition not active, starting fresh');
                                     try {
                                         window.speechRecognition.start();
                                         window.speechRecognitionActive = true;
-                                        console.log('Successfully restarted speech recognition');
                                         window.lastSpeechRecognitionEvent = Date.now();
-                                    } catch (startError) {
-                                        console.error('Failed to restart speech recognition:', startError);
+                                    } catch (freshStartError) {
+                                        console.error('Error starting fresh speech recognition:', freshStartError);
                                     }
-                                }, 300);
+                                }
                             }
                         } catch (e) {
                             console.error('Error handling stalled speech recognition:', e);
@@ -482,6 +506,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 lastAudioResult = null;
                 subtitlesData = [];
                 
+                // Show volume meter by triggering an update
+                const volumeDisplay = document.querySelector('.volume-display');
+                if (volumeDisplay) {
+                    volumeDisplay.style.display = 'block';
+                }
+                
             } else {
                 alert('Could not access microphone. Please check permissions.');
             }
@@ -498,8 +528,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.speechRecognition) {
                 try {
                     window.speechRecognition.stop();
+                    console.log("Speech recognition stopped");
                 } catch (e) {
-                    console.error('Error stopping speech recognition:', e);
+                    console.warn("Error stopping speech recognition:", e);
                 }
             }
             
@@ -520,19 +551,52 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log("Audio recording stopped, result:", audioResult ? 
               `blob: ${audioResult.blob.size} bytes, type: ${audioResult.type}` : "No audio result");
             
+            // Hide volume meter
+            const volumeDisplay = document.querySelector('.volume-display');
+            if (volumeDisplay) {
+                volumeDisplay.style.display = 'none';
+            }
+            
             if (audioResult && audioResult.blob && audioResult.blob.size > 0) {
                 try {
                     console.log(`Processing audio recording: ${audioResult.blob.size} bytes, type: ${audioResult.blob.type}, chunks: ${audioResult.chunks || 1}`);
-                    recordingStatus.textContent = 'Transcribing audio...';
+                    
+                    // Check for low volume warning
+                    if (audioResult.hasLowVolume || (audioResult.volumeData && audioResult.volumeData.level < 0.05)) {
+                        console.warn("Low volume detected during recording. Applying extra gain.");
+                        recordingStatus.textContent = 'Low volume detected. Enhancing audio...';
+                    } else {
+                        recordingStatus.textContent = 'Transcribing audio...';
+                    }
                     
                     let transcriptionSource = ""; // Initialize the variable
                     
-                    // MODIFIED: Always use Whisper API for transcription, even on iOS
+                    // Save the audio result for export
+                    lastAudioResult = audioResult;
+                    
                     try {
-                        console.log("Using Whisper API transcription for all devices...");
+                        console.log("Using Whisper API transcription...");
                         currentTranscript = await transcriptionService.transcribeAudio(audioResult);
                         console.log("Whisper transcription succeeded:", currentTranscript);
-                        transcriptionSource = "whisper"; // Set source to whisper after successful transcription
+                        
+                        // Check for empty transcript
+                        if (!currentTranscript || currentTranscript.trim() === '') {
+                            console.log("Whisper API returned empty transcription");
+                            
+                            // Check for browser transcript fallback
+                            if (savedTranscript && savedTranscript.length > 5) {
+                                console.log('Empty transcription from Whisper, using browser transcript as fallback:', savedTranscript);
+                                currentTranscript = savedTranscript.trim();
+                                transcriptionSource = "browser";
+                            } else {
+                                throw new Error("Transcription resulted in empty text. Please try speaking louder or check the microphone.");
+                            }
+                        }
+                        
+                        transcriptionSource = "whisper";
+                        
+                        // Get subtitle data from transcription service
+                        subtitlesData = transcriptionService.getSubtitleData();
                     } catch (whisperError) {
                         console.error('Whisper transcription failed:', whisperError);
                         
@@ -540,63 +604,34 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (savedTranscript && savedTranscript.length > 5) {
                             console.log('Using browser SpeechRecognition as fallback:', savedTranscript);
                             currentTranscript = savedTranscript.trim();
-                            transcriptionSource = "browser"; // Set source to browser when using fallback
+                            transcriptionSource = "browser";
                             
                             console.log("Using browser speech recognition result as fallback");
+                            
+                            // Generate subtitle data since we're using browser transcript
+                            subtitlesData = window.generateSubtitleData ? 
+                                window.generateSubtitleData(currentTranscript) : [];
+                                
+                            console.log(`Falling back to estimated timestamps for subtitles (source: ${transcriptionSource})`);
                         } else {
-                            // If no fallback is available, rethrow the error
                             throw whisperError;
                         }
                     }
                     
-                    // Extract tags from the full transcript
-                    const tags = await tagExtractor.extractTags(currentTranscript, 8, true);
-                    
-                    // Update word cloud instead of traditional tag display
-                    if (window.wordCloud) {
-                        window.wordCloud.updateWordCloud(tags);
-                    }
-                    
-                    // Add it to the chat as a user message
+                    // Add transcript to UI
                     addMessageToChat('user', currentTranscript);
                     
-                    // Enable the feedback button
-                    feedbackButton.disabled = false;
+                    // Update recording status
+                    recordingStatus.textContent = 'Click to start recording';
                     
-                    // Save the recording to history without AI response yet
-                    if (window.audioHandler) {
-                        // Create a proper file with the correct extension
-                        let fileExt = 'webm';
-                        if (audioResult.type.includes('mp4') || audioResult.type.includes('m4a')) {
-                            fileExt = 'mp4';
-                        } else if (audioResult.type.includes('mp3')) {
-                            fileExt = 'mp3';
-                        }
-                        
-                        window.audioHandler.addRecordingToHistory(
-                            new File([audioResult.blob], `recording.${fileExt}`, { type: audioResult.type }),
-                            currentTranscript
-                        );
+                    // Enable feedback button if we have a transcript
+                    if (currentTranscript && currentTranscript.length > 0) {
+                        feedbackButton.disabled = false;
+                        recognizedSpeech = true;
                     }
                     
-                    // Store audio result for export
-                    lastAudioResult = audioResult;
-                    
-                    // Get subtitle data from the transcription service - properly handle all sources
-                    let whisperSubtitles = null;
-                    if (transcriptionSource === "whisper") {
-                        whisperSubtitles = transcriptionService.getSubtitleData();
-                    }
-                    
-                    if (whisperSubtitles && whisperSubtitles.length > 0) {
-                        // Use Whisper's native timestamp data if available
-                        subtitlesData = whisperSubtitles;
-                        console.log("Using Whisper's native timestamps for subtitles");
-                    } else {
-                        // Fall back to our estimation method for other transcription sources
-                        subtitlesData = generateSubtitleData(currentTranscript);
-                        console.log(`Falling back to estimated timestamps for subtitles (source: ${transcriptionSource})`);
-                    }
+                    // Update tag cloud with extracted tags
+                    updateRealtimeTags(currentTranscript);
                     
                     // Enable export buttons
                     if (exportTxtBtn) exportTxtBtn.disabled = false;
@@ -605,6 +640,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (exportVideoBtn) exportVideoBtn.disabled = false;
                     if (previewSubtitlesBtn) previewSubtitlesBtn.disabled = false;
                     
+                    // Save to history if audio handler available
+                    if (window.audioHandler) {
+                        window.audioHandler.addToHistory(audioResult, currentTranscript);
+                    }
                 } catch (error) {
                     console.error('Error processing audio:', error);
                     
@@ -617,34 +656,51 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
                     
-                    // More iOS-specific error message
+                    // Improve error messages for common issues
                     let errorMessage = error.message;
-                    if (audioRecorder.isIOS) {
-                        errorMessage += '\n\nOn iOS, direct recording can be problematic. Please try using the upload option below instead.';
+                    if (errorMessage.includes("format not supported") || 
+                        errorMessage.includes("could not be decoded")) {
+                        errorMessage = "Audio format not supported by Whisper API. Try uploading a MP3/WAV file instead.";
+                    } else if (errorMessage.includes("too short")) {
+                        errorMessage = "Audio is too short. Please record at least 0.5 seconds of audio.";
+                    } else if (errorMessage.includes("too large")) {
+                        errorMessage = "Audio file is too large (over 25MB). Please record a shorter clip.";
+                    } else if (errorMessage.includes("empty")) {
+                        errorMessage = "No speech detected in the recording. Please check your microphone and try speaking louder.";
                     }
                     
                     alert('Error: ' + errorMessage + errorDetails);
                     recordingStatus.textContent = 'Transcription failed. Try using the upload option.';
                     
-                    if (audioRecorder.isIOS) {
-                        // Highlight the upload area for iOS users
-                        const uploadArea = document.querySelector('.audio-drop-area');
-                        if (uploadArea) {
-                            uploadArea.style.borderColor = '#ff5722';
-                            uploadArea.style.backgroundColor = 'rgba(255, 87, 34, 0.05)';
-                            setTimeout(() => {
-                                uploadArea.style.borderColor = '';
-                                uploadArea.style.backgroundColor = '';
-                            }, 3000);
+                    // Still try to use the browser transcript if we have it
+                    if (savedTranscript && savedTranscript.length > 10) {
+                        console.log('Using browser transcription after error:', savedTranscript);
+                        currentTranscript = savedTranscript;
+                        addMessageToChat('user', currentTranscript);
+                        
+                        // Enable feedback button if we have a transcript
+                        feedbackButton.disabled = false;
+                        
+                        // Generate subtitle data for browser transcription
+                        subtitlesData = window.generateSubtitleData ? 
+                            window.generateSubtitleData(currentTranscript) : [];
+                        
+                        // Update tag cloud
+                        updateRealtimeTags(currentTranscript);
+                        
+                        // Enable export buttons
+                        if (exportTxtBtn) exportTxtBtn.disabled = false;
+                        if (exportSrtBtn) exportSrtBtn.disabled = false;
+                        if (exportAudioBtn) exportAudioBtn.disabled = false;
+                        if (exportVideoBtn) exportVideoBtn.disabled = false;
+                        if (previewSubtitlesBtn) previewSubtitlesBtn.disabled = false;
+                        
+                        // Save to history with error flag
+                        if (window.audioHandler) {
+                            window.audioHandler.addToHistory(audioResult, currentTranscript, true);
                         }
                     }
-                    
-                    feedbackButton.disabled = true;
                 } finally {
-                    // Reset the recording UI
-                    recordingStatus.textContent = audioRecorder.isIOS ? 
-                        'Click to record (iOS users: upload option recommended)' : 
-                        'Click to start recording';
                     recordButton.disabled = false;
                     recordButton.classList.remove('processing');
                     isProcessingAudio = false;
@@ -1630,4 +1686,167 @@ function getEffectiveLanguage() {
 
 // Make function available globally to prevent reference errors
 window.getEffectiveLanguage = getEffectiveLanguage;
+
+// Add auto gain control toggle to recording section
+const recordingSection = document.querySelector('.recording-section');
+if (recordingSection) {
+    // Create the sensitivity controls UI
+    const autoGainContainer = document.createElement('div');
+    autoGainContainer.className = 'auto-gain-container';
+    
+    // Create a more sophisticated UI with both toggle and mode selector
+    autoGainContainer.innerHTML = `
+        <div class="sensitivity-controls">
+            <label class="toggle-switch" title="Automatically adjust microphone sensitivity">
+                <input type="checkbox" id="autoGainToggle" ${audioRecorder.autoGainEnabled ? 'checked' : ''}>
+                <span class="slider round"></span>
+            </label>
+            <span class="toggle-label">Mic Sensitivity</span>
+            
+            <div class="sensitivity-mode-selector">
+                <select id="sensitivityModeSelect" ${!audioRecorder.autoGainEnabled ? 'disabled' : ''}>
+                    <option value="auto" ${audioRecorder.sensitivityMode === 'auto' ? 'selected' : ''}>Auto</option>
+                    <option value="maximum" ${audioRecorder.sensitivityMode === 'maximum' ? 'selected' : ''}>Maximum</option>
+                </select>
+            </div>
+        </div>
+    `;
+    
+    // Add it after the recording status
+    const recordingStatus = document.getElementById('recordingStatus');
+    if (recordingStatus && recordingStatus.nextSibling) {
+        recordingSection.insertBefore(autoGainContainer, recordingStatus.nextSibling);
+    } else {
+        recordingSection.appendChild(autoGainContainer);
+    }
+    
+    // Set up event listener for the toggle
+    const autoGainToggle = document.getElementById('autoGainToggle');
+    if (autoGainToggle) {
+        autoGainToggle.addEventListener('change', (e) => {
+            const enabled = e.target.checked;
+            audioRecorder.toggleAutoGain(enabled);
+            
+            // Enable/disable sensitivity mode selector based on toggle state
+            const sensitivityModeSelect = document.getElementById('sensitivityModeSelect');
+            if (sensitivityModeSelect) {
+                sensitivityModeSelect.disabled = !enabled;
+            }
+            
+            console.log(`Mic sensitivity ${enabled ? 'enabled' : 'disabled'}`);
+        });
+    }
+    
+    // Set up event listener for the sensitivity mode selector
+    const sensitivityModeSelect = document.getElementById('sensitivityModeSelect');
+    if (sensitivityModeSelect) {
+        sensitivityModeSelect.addEventListener('change', (e) => {
+            const mode = e.target.value;
+            audioRecorder.setSensitivityMode(mode);
+            console.log(`Sensitivity mode changed to: ${mode}`);
+        });
+    }
+}
+
+// Enhance the audio recorder to include speech detection
+// Add this to the global initialization area near bottom of file
+if (audioRecorder) {
+    // Add an audio level detector to help diagnose silent recordings
+    audioRecorder.enableAudioLevelDetection = true;
+}
+
+// Add volume meter element after recording status
+if (recordingSection && !document.getElementById('volumeMeter')) {
+    const volumeDisplay = document.createElement('div');
+    volumeDisplay.className = 'volume-display';
+    volumeDisplay.innerHTML = `
+        <div class="volume-meter-container">
+            <div class="volume-meter">
+                <div id="volumeMeterLevel" class="volume-meter-level"></div>
+            </div>
+            <div id="volumeStatus" class="volume-status"></div>
+        </div>
+    `;
+    
+    // Insert after recording status
+    const recordingStatus = document.getElementById('recordingStatus');
+    if (recordingStatus && recordingStatus.nextSibling) {
+        recordingSection.insertBefore(volumeDisplay, recordingStatus.nextSibling);
+    } else {
+        recordingSection.appendChild(volumeDisplay);
+    }
+    
+    // Add styles if not already in CSS
+    const style = document.createElement('style');
+    style.textContent = `
+        .volume-display { display: none; margin-top: 10px; width: 100%; max-width: 300px; }
+        .volume-meter-container { width: 100%; }
+        .volume-meter { height: 8px; background-color: #e9ecef; border-radius: 4px; overflow: hidden; }
+        .volume-meter-level { height: 100%; width: 0%; background-color: #4a90e2; transition: width 0.1s; }
+        .volume-status { font-size: 12px; text-align: center; margin-top: 4px; color: #666; }
+        .volume-level-low .volume-meter-level { background-color: #e74c3c; }
+        .volume-level-good .volume-meter-level { background-color: #2ecc71; }
+        .volume-level-high .volume-meter-level { background-color: #f39c12; }
+        
+        .volume-status.status-low { color: #e74c3c; }
+        .volume-status.status-normal { color: #2ecc71; }
+        .volume-status.status-high { color: #f39c12; }
+    `;
+    document.head.appendChild(style);
+}
+
+// Register for low volume warnings
+window.addEventListener('lowVolumeDetected', (event) => {
+    // Show a warning to the user about low volume
+    const recordingStatus = document.getElementById('recordingStatus');
+    if (recordingStatus) {
+        recordingStatus.innerHTML = 'Recording... <span style="color:#e74c3c;">Volume too low - please speak louder!</span>';
+    }
+});
+
+// Add volume callback to show meter during recording
+if (audioRecorder) {
+    audioRecorder.onVolumeUpdate((level) => {
+        // Update volume meter if it exists
+        const volumeMeter = document.getElementById('volumeMeterLevel');
+        const volumeStatus = document.getElementById('volumeStatus');
+        const volumeDisplay = document.querySelector('.volume-display');
+        
+        if (volumeMeter && volumeStatus && volumeDisplay) {
+            // Only show volume meter during recording
+            if (audioRecorder.isRecording) {
+                volumeDisplay.style.display = 'block';
+                
+                // Update meter level (0-100%)
+                const percentage = Math.min(100, Math.round(level * 100 * 2)); // Double the visual to make it more apparent
+                volumeMeter.style.width = `${percentage}%`;
+                
+                // Update volume status
+                let status = 'normal';
+                let message = 'Volume OK';
+                
+                if (level < 0.05) {
+                    status = 'low';
+                    message = 'Volume too low! Speak louder';
+                } else if (level > 0.8) {
+                    status = 'high';
+                    message = 'Volume too high! Speak softer';
+                }
+                
+                // Update status classes
+                volumeStatus.className = 'volume-status status-' + status;
+                volumeStatus.textContent = message;
+                
+                // Update meter color class
+                const meterContainer = volumeMeter.parentElement;
+                meterContainer.className = 'volume-meter volume-level-' + 
+                    (level < 0.05 ? 'low' : (level > 0.8 ? 'high' : 'good'));
+            } else {
+                volumeDisplay.style.display = 'none';
+            }
+        }
+    });
+}
+
+// ...existing code...
 });
